@@ -27,12 +27,12 @@ TODO: update
 - Lotka-Volterra
     - `lv_ude.py`: fit multiple input trajectories using a UDE-like approach
     and perform model recovery using `PySINDy`
-    - `lv_lstm.py`: fit multiple input trajectories using the LSTM and perform
+    - `lv_lstm.py`: fit multiple input trajectories using LSTM and perform
     model recovery using `PySINDy`
 - Ecosystem model
     - `eco_ude.py`: fit multiple input trajectories using a UDE-like approach
     and perform model recovery using `PySINDy`
-    - `eco_lstm.py`: fit multiple input trajectories using the LSTM
+    - `eco_lstm.py`: fit multiple input trajectories using LSTM
 - Repressilator model
     - `repressilator_ude.py`: fit multiple input trajectories using a UDE-like
     approach and perform model recovery using `PySINDy`

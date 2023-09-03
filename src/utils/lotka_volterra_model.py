@@ -125,4 +125,4 @@ def get_hybrid_dynamics(
     latent_dynamics = NeuralDynamics(num_hidden_neurons, activation_func)
     hybrid_dynamics = HybridDynamics(growth_rates, latent_dynamics)
 
-    return torch.compile(hybrid_dynamics)
+    return hybrid_dynamics
