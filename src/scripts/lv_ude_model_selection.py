@@ -8,7 +8,7 @@ import torch
 from torch import nn
 import h5py
 
-from time_series_data import TimeSeries
+from time_series_data import load_sample_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from lotka_volterra_model import get_hybrid_dynamics
 
@@ -39,21 +39,15 @@ def get_args():
     arg_parser.add_argument('--batch_sizes', nargs='+', type=int,
                             default=[5, 10, 20],
                             help='Batch sizes to search over')
+    arg_parser.add_argument('--num_epochs', type=int, default=10,
+                            help='Number of epochs to train for each '
+                            'combination of hyperparameters')
+    arg_parser.add_argument('--compile_model', action='store_true',
+                            help='Compile the UDE model before training')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
 
     return arg_parser.parse_args()
-
-
-def load_sample(h5_fd, data_type):
-    sample = []
-    data_group = h5_fd[data_type]
-
-    for i in range(data_group.attrs['sample_size']):
-        data = data_group[f'sample_{i:04d}']
-        sample.append(TimeSeries(data['t'][...], data['x'][...]))
-
-    return sample
 
 
 def main():
@@ -61,9 +55,10 @@ def main():
     verbose = args.verbose
 
     # load data
-    print('Loading data...', flush=True)
     noise_level = args.noise_level
     seed = args.seed
+    print(f'Loading data with {noise_level} noise level and seed '
+          f'{seed:04d}...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
     data_path = os.path.join(
@@ -73,9 +68,17 @@ def main():
     params_true = data_fd.attrs['param_values']
     growth_rates = np.array([params_true[0], -params_true[3]])
     t_train_span = data_fd['train'].attrs['t_span']
-    train_sample = load_sample(data_fd, 'train')
-    valid_sample = load_sample(data_fd, 'valid')
+    train_sample = load_sample_from_h5(data_fd, 'train')[:50]
+    valid_sample = load_sample_from_h5(data_fd, 'valid')
     data_fd.close()
+    print('Data loaded', flush=True)
+    print('True parameter value:', params_true, flush=True)
+    print('Time span of training data:', t_train_span, flush=True)
+    print('Training sample size:', len(train_sample), flush=True)
+    print('Validation sample size:', len(valid_sample), flush=True)
+
+    stdout_delim = '\n' + '=' * 60 + '\n'
+    print(stdout_delim, flush=True)
 
     # set up for output files
     print('Setting up training...', flush=True)
@@ -84,7 +87,8 @@ def main():
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
-        output_dir, f'noise-{noise_level:.3f}-ude-model-selection')
+        output_dir,
+        f'noise-{noise_level:.3f}-seed-{seed:04d}-ude-model-selection')
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -95,28 +99,39 @@ def main():
     learning_rates = args.learning_rates
     window_sizes = args.window_sizes
     batch_sizes = args.batch_sizes
-    num_epochs = 10
+    num_epochs = args.num_epochs
     model_metrics = pd.DataFrame(
         columns=['learning_rate', 'window_size', 'batch_size', 'best_epoch',
                  'best_valid_loss'])
+
+    print('Training setup finished', flush=True)
+    print('Network architecture:', flush=True)
+    print('- Hidden neurons:', args.num_hidden_neurons, flush=True)
+    print('- Activation function:', args.activation, flush=True)
+    print('Hyperparameters to search over:', flush=True)
+    print('- Learning rates:', learning_rates, flush=True)
+    print('- Window sizes:', window_sizes, flush=True)
+    print('- Batch sizes:', batch_sizes, flush=True)
+    print(stdout_delim, flush=True)
 
     # train for different combinations of hyperparameters
     for lr, ws, bs in itertools.product(learning_rates, window_sizes,
                                         batch_sizes):
         print('Learning UDE with the following settings:', flush=True)
-        print(f'Learning rate: {lr:.3f}', flush=True)
-        print(f'Window size: {ws}', flush=True)
-        print(f'Batch size: {bs}', flush=True)
-        print(f'Number of epochs: {num_epochs}', flush=True)
+        print(f'- Learning rate: {lr:.3f}', flush=True)
+        print(f'- Window size: {ws}', flush=True)
+        print(f'- Batch size: {bs}', flush=True)
+        print(f'- Number of epochs: {num_epochs}', flush=True)
 
         # train the model
         hybrid_dynamics = get_hybrid_dynamics(
-            growth_rates, args.num_hidden_neurons, args.activation)
+            growth_rates, num_hidden_neurons=args.num_hidden_neurons,
+            activation=args.activation, compile_model=args.compile_model)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
         ts_learner = NeuralDynamicsLearner(train_sample, output_dir,
                                            output_prefix)
         ts_learner.train(hybrid_dynamics, loss_func, optimizer, lr, ws, bs,
-                         num_epochs, seed=0, valid_data=valid_sample,
+                         num_epochs, seed=seed, valid_data=valid_sample,
                          valid_kwargs={'solver_backend': 'scipy',
                                        'verbose': False},
                          save_epoch_model=True, verbose=verbose,
@@ -143,11 +158,11 @@ def main():
         print('Saved plots of dynamics predicted by the best model',
               flush=True)
 
-        print('\n==========\n', flush=True)
+        print(stdout_delim, flush=True)
 
-    print('Finished training with all combinations of hyperparameters',
+    print('Finished training for all combinations of hyperparameters',
           flush=True)
-    model_metrics_path = os.path.join(output_dir, 'model_metrics.csv')
+    model_metrics_path = os.path.join(output_dir, 'ude_model_metrics.csv')
     model_metrics.to_csv(model_metrics_path, index=False)
     print('Saved all model metrics', flush=True)
 

@@ -97,9 +97,8 @@ def rbf_activation(x):
 
 def get_hybrid_dynamics(
         growth_rates: np.ndarray,
-        num_hidden_neurons: list[int] | None = None,
-        activation: str = 'tanh'
-        ) -> nn.Module:
+        num_hidden_neurons: list[int] | None = None, activation: str = 'tanh',
+        compile_model: bool = False) -> nn.Module:
     """Return the hybrid dynamics for the Lotka-Volterra model.
 
     Args:
@@ -111,6 +110,7 @@ def get_hybrid_dynamics(
         activation (str): activation function to use in the latent dynamics.
             Can be either `rbf` for custom radial basis function, or any of the
             activation functions in `torch.nn.functional`. Default is `tanh`.
+        compile (bool): whether to compile the model. Default is False.
 
     Returns:
         nn.Module: hybrid dynamics for the Lotka-Volterra model.
@@ -124,5 +124,8 @@ def get_hybrid_dynamics(
         num_hidden_neurons = [5, 5]
     latent_dynamics = NeuralDynamics(num_hidden_neurons, activation_func)
     hybrid_dynamics = HybridDynamics(growth_rates, latent_dynamics)
+
+    if compile_model:
+        hybrid_dynamics = torch.compile(hybrid_dynamics)
 
     return hybrid_dynamics

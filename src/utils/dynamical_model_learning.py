@@ -447,7 +447,10 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             dtype=self._torch_dtype, shuffle=True)
 
         # set up validation data
-        if valid_data is not None:
+        if valid_data is None:
+            self._valid_data = None
+            self._valid_metrics = None
+        else:
             self._valid_data = valid_data
 
             if valid_kwargs is None:
@@ -457,9 +460,6 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             valid_kwargs.setdefault('show_progress', show_progress)
 
             self._valid_metrics = []
-        else:
-            self._valid_data = None
-            self._valid_metrics = None
 
         # train the model
         for epoch in range(self._num_epochs):
@@ -1142,6 +1142,8 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
               basis_funcs: list[Callable] | None = None,
               basis_names: list[Callable] | None = None,
               optimizer_kwargs: dict[str, Any] | None = None,
+              valid_data: list[TimeSeries] | None = None,
+              valid_kwargs: dict[str, Any] | None = None,
               verbose: bool = False, **kwargs) -> None:
         """Reconstruct symbolic form of ordinary differential equations from
         training data using SINDy.
@@ -1169,6 +1171,11 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 determined by the backend.
             optimizer_kwargs (dict[str, Any] | None): additional keyword
                 arguments for the optimizer. Default is None.
+            valid_data (list[TimeSeries] | None): validation data. If set to
+                None, no validation will be performed. Default is None.
+            valid_kwargs (dict[str, Any] | None): additional keyword arguments
+                for validation. Refer to `eval()` for possible keyword
+                arguments. Default is None.
             verbose (bool): whether to print additional information. Default is
                 `False`.
             **kwargs: additional keyword arguments. Not used here.
@@ -1196,6 +1203,13 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         x = [ts.x for ts in self._train_data]
         t = [ts.t for ts in self._train_data]
 
+        if valid_data is None:
+            self._valid_data = None
+            self._valid_metrics = None
+        else:
+            self._valid_data = valid_data
+            self._valid_metrics = {}
+
         if verbose:
             print('Learning ODEs...', flush=True)
 
@@ -1206,6 +1220,17 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
             self._model.fit(x, t=t, multiple_trajectories=True)
 
         self._is_trained = True
+
+        if valid_data is not None:
+            if verbose:
+                print('Validating learned ODEs...', flush=True)
+
+            valid_pred_data = []
+            self._eval(self._valid_data, valid_pred_data, **valid_kwargs)
+            self._valid_metrics.update(
+                self._get_mse(valid_pred_data, valid_data))
+            self._valid_metrics.update(
+                self._get_aicc(valid_pred_data, valid_data))
 
         if verbose:
             print('Learned ODEs:', flush=True)
@@ -1246,7 +1271,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 `eval_func` is a larger system in which the learned system is
                 part of. Must be of the form `def eval_func(t, x, model)` where
                 `model` is the learned model. If set to `None`, the learned
-                system will be used.
+                system will be used. Default is `None`.
             integrator_kwargs (dict | None): additional keyword arguments for
                 the integrator. Default is `None`.
             verbose (bool): whether to print additional information. Default is
@@ -1267,13 +1292,6 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         eval_sample_size = len(eval_data)
         self._pred_data = []
 
-        # set up evaluation function
-        if eval_func is None:
-            def default_eval_func(t, x):
-                return self._model.predict(x[np.newaxis, :])[0]
-
-            eval_func = default_eval_func
-
         # set up integrator
         if integrator_kwargs is None:
             integrator_kwargs = {}
@@ -1283,31 +1301,17 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         self._eval_metrics = {}
 
         num_successes = 0
-        num_integration_failures = 0
-        num_termination_events = 0
 
-        for ts in self._eval_data:
-            ivp_solution = solve_ivp(eval_func, (ts.t[0], ts.t[-1]),
-                                     ts.x[0, :], t_eval=ts.t,
-                                     **integrator_kwargs)
-
-            match ivp_solution.status:
-                case -1:
-                    num_integration_failures += 1
-                case 1:
-                    num_termination_events += 1
-                case 0:
-                    num_successes += 1
-
-            if isinstance(ivp_solution.t, np.ndarray):
-                ts_pred = TimeSeries(ivp_solution.t, ivp_solution.y.T)
-                self._pred_data.append(ts_pred)
-            else:
-                self._pred_data.append(None)
+        self._eval(self._eval_data, self._pred_data, eval_func,
+                   integrator_kwargs)
 
         self._is_evaluated = True
         self._eval_metrics.update(self._get_mse(self._pred_data, ref_data))
         self._eval_metrics.update(self._get_aicc(self._pred_data, ref_data))
+
+        for ts_eval, ts_pred in zip(self._eval_data, self._pred_data):
+            if ts_pred is not None and np.array_equal(ts_eval.t, ts_pred.t):
+                num_successes += 1
         self._eval_metrics['success_rate'] = num_successes / eval_sample_size
 
         if verbose:
@@ -1316,11 +1320,40 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                   flush=True)
             print('Number of successful evaluations:', num_successes,
                   flush=True)
-            print('Number of integration step failures:',
-                  num_integration_failures, flush=True)
-            print('Number of termination events:', num_termination_events,
-                  flush=True)
             self.print_eval_metrics()
+
+    def _eval(self, eval_data: list[TimeSeries], pred_data: list[TimeSeries],
+              eval_func: Callable | None = None,
+              integrator_kwargs: dict | None = None) -> None:
+        """Core method for evaluating the learned ODEs.
+
+        Args:
+            eval_data (list[TimeSeries]): list of time series to evaluate.
+            pred_data (list[TimeSeries]): list to store predicted time series.
+            eval_func (Callable | None): function for evaluation. Must be of
+                the form `def eval_func(t, x, model)` where `model` is the
+                learned model. If set to `None`, the learned system will be
+                used. Default is `None`.
+            integrator_kwargs (dict | None): additional keyword arguments for
+                the integrator. Default is `None`.
+        """
+        # set up evaluation function
+        if eval_func is None:
+            def default_eval_func(t, x):
+                return self._model.predict(x[np.newaxis, :])[0]
+
+            eval_func = default_eval_func
+
+        for ts in eval_data:
+            ivp_solution = solve_ivp(eval_func, (ts.t[0], ts.t[-1]),
+                                     ts.x[0, :], t_eval=ts.t,
+                                     **integrator_kwargs)
+
+            if isinstance(ivp_solution.t, np.ndarray):
+                ts_pred = TimeSeries(ivp_solution.t, ivp_solution.y.T)
+                pred_data.append(ts_pred)
+            else:
+                pred_data.append(None)
 
     def _get_aicc(self, pred_data: list[TimeSeries],
                   ref_data: list[TimeSeries]) -> dict[str, Any]:

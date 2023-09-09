@@ -22,23 +22,56 @@ class TimeSeries:
 
         Raises:
             RuntimeError: if t is not a 1-d array.
-            RuntimeError: if x is not a 2-d array.
+            RuntimeError: if x is not a 1-d or 2-d array.
             RuntimeError: if t and x have different number of time points.
+            RuntimeError: if dx is not a 1-d or 2-d array when dx is not None.
+            RuntimeError: if t and dx have different number of time points
+                when dx is not None.
+            RuntimeError: if x and dx have different number of variables
+                when dx is not None.
         """
-        # check inputs
+        # check input t
         if t.ndim != 1:
             raise RuntimeError('t is expected to be a 1-d array')
 
-        if x.ndim != 2:
-            raise RuntimeError('x is expected to be a 2-d array')
+        # check input x
+        match x.ndim:
+            case 1:
+                x = x[:, np.newaxis].copy()
+            case 2:
+                x = x.copy()
+            case _:
+                raise RuntimeError('x is expected to be a 1-d or 2-d array')
 
         if t.shape[0] != x.shape[0]:
             msg = f't has {t.shape[0]} time point(s), but x has {x.shape[0]}'
             raise RuntimeError(msg)
 
+        # check input dx
+        if dx is not None:
+            match dx.ndim:
+                case 1:
+                    dx = dx[:, np.newaxis].copy()
+                case 2:
+                    dx = dx.copy()
+                case _:
+                    msg = 'dx is expected to be a 1-d or 2-d array'
+                    raise RuntimeError(msg)
+
+            if t.shape[0] != dx.shape[0]:
+                msg = f't has {t.shape[0]} time point(s), but dx has ' \
+                      f'{dx.shape[0]}'
+                raise RuntimeError(msg)
+
+            if x.shape[1] != dx.shape[1]:
+                msg = f'x has {x.shape[1]} variable(s), but dx has ' \
+                      f'{dx.shape[1]}'
+                raise RuntimeError(msg)
+
+        # store input data
         self._t = t.copy()
-        self._x = x.copy()
-        self._dx = None if dx is None else dx.copy()
+        self._x = x
+        self._dx = dx
 
     def __getitem__(self, idx):
         dx = None
@@ -49,12 +82,14 @@ class TimeSeries:
 
             if self._dx is not None:
                 dx = self._dx[idx, :, np.newaxis]
-        else:
+        elif isinstance(idx, slice) or isinstance(idx, np.ndarray):
             t = self._t[idx]
             x = self._x[idx, :]
 
             if self._dx is not None:
                 dx = self._dx[idx, :]
+        else:
+            raise RuntimeError('index must be an integer or a slice')
 
         return TimeSeries(t, x, dx=dx)
 
@@ -236,3 +271,14 @@ def get_dataloader(
         dataset, batch_size=batch_size, shuffle=shuffle)
 
     return dataloader
+
+
+def load_sample_from_h5(h5_fd, data_type):
+    sample = []
+    data_group = h5_fd[data_type]
+
+    for i in range(data_group.attrs['sample_size']):
+        data = data_group[f'sample_{i:04d}']
+        sample.append(TimeSeries(data['t'][...], data['x'][...]))
+
+    return sample
