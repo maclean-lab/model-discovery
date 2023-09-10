@@ -183,6 +183,8 @@ def get_args():
         'Lotka-Volterra model.')
     arg_parser.add_argument('--noise_level', type=float, default=0.01,
                             help='Noise level of training data')
+    arg_parser.add_argument('--seed', type=int, default=2023,
+                            help='Random seed of generated data')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
@@ -191,9 +193,6 @@ def get_args():
                             choices=['tanh', 'relu', 'rbf'],
                             help='Activation function for the latent network'
                             ' in the UDE model')
-    arg_parser.add_argument('--t_train_span', nargs=2, type=float,
-                            default=(0.0, 3.0),
-                            help='Time span for generating training data')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
 
