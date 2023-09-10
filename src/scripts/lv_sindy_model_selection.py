@@ -241,10 +241,13 @@ def main():
     test_sample = load_sample_from_h5(data_fd, 'test')
     data_fd.close()
     print('Data loaded', flush=True)
-    print('True parameter value:', params_true, flush=True)
-    print('Time span of training data:', t_train_span, flush=True)
+    param_str = ', '.join(str(p) for p in params_true)
+    print(f'True parameter value: [{param_str}]', flush=True)
+    t_span_str = ', '.join(str(t) for t in t_train_span)
+    print(f'Time span of training data: ({t_span_str})', flush=True)
     print('Training sample size:', len(train_sample), flush=True)
     print('Validation sample size:', len(valid_sample), flush=True)
+    print('Test sample size:', len(valid_sample), flush=True)
 
     stdout_delim = '\n' + '=' * 60 + '\n'
     print(stdout_delim, flush=True)
