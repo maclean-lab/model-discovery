@@ -1344,6 +1344,19 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
 
             eval_func = default_eval_func
 
+        # convert 'model' in args (used by solve_ivp()) to the actual learned
+        # model. this is useful when the learned model is needed for validation
+        # inside train(), as self._model is yet to be created when train() is
+        # first called
+        if 'args' in integrator_kwargs and integrator_kwargs['args']:
+            args = list(integrator_kwargs['args'])
+            try:
+                idx = args.index('model')
+                args[idx] = self._model
+                integrator_kwargs['args'] = tuple(args)
+            except ValueError:
+                pass
+
         for ts in eval_data:
             ivp_solution = solve_ivp(eval_func, (ts.t[0], ts.t[-1]),
                                      ts.x[0, :], t_eval=ts.t,
@@ -1394,6 +1407,8 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         else:
             metrics['indiv_aicc'] = np.full(self._num_vars, np.nan)
             metrics['aicc'] = np.nan
+
+        return metrics
 
 
 def get_nn_derivatives(model: nn.Module, x: Tensor) -> Tensor:

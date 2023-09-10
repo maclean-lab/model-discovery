@@ -6,12 +6,15 @@ from argparse import ArgumentParser
 import numpy as np
 import pandas as pd
 from pysindy import STLSQ
+import matplotlib
 import h5py
 
 from time_series_data import load_sample_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from dynamical_model_learning import OdeSystemLearner
 from lotka_volterra_model import get_hybrid_dynamics
+
+matplotlib.use('Cairo')
 
 
 def search_time_steps(search_config, verbose=False):
@@ -21,6 +24,9 @@ def search_time_steps(search_config, verbose=False):
     train_sample_size = len(train_sample)
 
     for t_step in search_config['t_ude_steps']:
+        print(f'Generating UDE dynamics on t_step {t_step:.03f} for SINDy '
+              'training...',
+              flush=True)
         t_train_sindy = [np.arange(t_train_span[0], t_train_span[1] + 1e-8,
                                    t_step)
                          for _ in range(train_sample_size)]
@@ -42,6 +48,10 @@ def search_time_steps(search_config, verbose=False):
                 ts = ts[5:-5]
 
             sindy_train_sample.append(ts)
+
+        print('UDE dynamics generated')
+        stdout_delim = '\n' + '=' * 60 + '\n'
+        print(stdout_delim, flush=True)
 
         search_basis(search_config, sindy_train_sample, {'t_step': t_step},
                      verbose=verbose)
@@ -143,7 +153,7 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
                      valid_data=valid_sample,
                      valid_kwargs={
                          'eval_func': recovered_dynamics,
-                         'integrator_kwargs': {'args': (eq_learner.model, ),
+                         'integrator_kwargs': {'args': ('model', ),
                                                'events': stop_events}},
                      verbose=verbose)
     print('SINDy learning finished', flush=True)
@@ -275,7 +285,6 @@ def main():
         hybrid_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
 
     print('UDE model loaded', flush=True)
-    print(stdout_delim, flush=True)
 
     # set up for SINDy model selection
     output_dir = os.path.join(
@@ -328,6 +337,7 @@ def main():
     search_config['stop_events'] = [check_upper_bound, check_lower_bound]
 
     print('SINDy model selection setup finished', flush=True)
+    print(stdout_delim, flush=True)
 
     search_time_steps(search_config, verbose=verbose)
     print('Search completed', flush=True)
