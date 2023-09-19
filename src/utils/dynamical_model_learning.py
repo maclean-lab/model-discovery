@@ -9,7 +9,8 @@ from scipy.integrate import solve_ivp
 import torch
 from torch import nn, Tensor
 from torch.utils.data import DataLoader as TorchDataLoader
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint_adjoint as tdf_odeint
+import torchode
 import pysindy as ps
 from pysindy.feature_library import CustomLibrary
 import matplotlib.pyplot as plt
@@ -209,7 +210,13 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
         metrics = {}
 
         for ts_ref, ts_pred in zip(ref_data, pred_data):
-            if ts_pred is None:
+            if ts_pred is None or len(ts_pred) == 0:
+                continue
+
+            # prediction data contains values only at t[0] but reference data
+            # has more
+            if (len(ts_pred) == 1 and len(ts_ref) > 1
+                    and ts_pred.t[0] in ts_ref.t):
                 continue
 
             ts_ref, ts_pred = align_time_series(ts_ref, ts_pred)
@@ -820,6 +827,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
         super().__init__(train_data, output_dir, output_prefix, *args,
                          torch_dtype=torch_dtype, **kwargs)
 
+        self._ode_integrator = None
         self._sub_pred_data: dict[str, list[np.ndarray]] | None = None
 
     @property
@@ -844,6 +852,9 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
               num_epochs: int, *args, seed: int | None = None,
               optimizer_kwargs: dict | None = None,
               training_params: Iterable | None = None,
+              integrator_backend:
+              Literal['torchdiffeq', 'torchode'] = 'torchdiffeq',
+              torchode_step_method: Literal['Dopri5', 'Tsit5'] = 'Dopri5',
               valid_data: list[TimeSeries] | None = None,
               valid_kwargs: dict | None = None, save_epoch_model: bool = False,
               epoch_model_output_suffix: str = 'model_state',
@@ -879,6 +890,11 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             training_params (Iterable | None): model parameters to be trained.
                 If set to None, all model parameters will be trained. Default
                 is None.
+            integrator_backend (Literal['torchdiffeq', 'torchode']): backend
+                for ODE integrator. Default is `torchdiffeq`.
+            torchode_step_method (Literal['Dopri5', 'Tsit5']): type of ODE
+                integration method from `torchode`. Only used if
+                `integrator_backend` is `torchode`. Default is `Dopri5`.
             valid_data (list[TimeSeries] | None): validation data. If set to
                 None, no validation will be performed. Default is None.
             valid_kwargs (dict | None): additional keyword arguments for
@@ -899,6 +915,12 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             **kwargs: additional keyword arguments. Not used here.
         """
         dummy_input_mask = torch.zeros(window_size, dtype=bool)
+        self._integrator_backend = integrator_backend
+
+        # set up torchode integrator
+        if self._integrator_backend == 'torchode':
+            self._get_torch_ode_integrator(model, torchode_step_method)
+
         super().train(model, loss_func, optimizer_type, learning_rate,
                       window_size, batch_size, num_epochs, dummy_input_mask,
                       *args, seed=seed, optimizer_kwargs=optimizer_kwargs,
@@ -927,21 +949,49 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             loss = 0
             optimizer.zero_grad()
 
-            for i in range(self._batch_size):
-                x_out = odeint(self._model, x[i, 0, :], t[i, :])
-                loss += self._loss_func(x[i, ...], x_out)
+            if self._integrator_backend == 'torchode':
+                ivp_problem = torchode.InitialValueProblem(
+                    y0=x[:, 0, :], t_eval=t)
+                ivp_solution = self._ode_integrator.solve(ivp_problem)
+                loss = self._loss_func(x, ivp_solution.ys)
+            else:  # self._integrator_backend == 'torchdiffeq'
+                for i in range(self._batch_size):
+                    x_out = tdf_odeint(self._model, x[i, 0, :], t[i, :])
+                    loss += self._loss_func(x[i, ...], x_out)
+                loss /= self._batch_size
 
-            loss /= self._batch_size
             loss.backward()
             optimizer.step()
             self._training_losses.append(loss.item())
+
+    def _get_torch_ode_integrator(
+            self, model: nn.Module,
+            step_method: Literal['Dopri5', 'Tsit5'] = 'Dopri5') -> None:
+        """Get ODE integrator from `torchode`.
+
+        The ODE integrator will be stored in the `_ode_integrator` attribute.
+
+        Args:
+            model (nn.Module): PyTorch module to be integrated.
+            torchode_step_method (Literal['Dopri5', 'Tsit5']): type of ODE
+                integration method from `torchode`.  Default is `Dopri5`.
+        """
+        ode_term = torchode.ODETerm(model)
+        ode_step_method = getattr(torchode, step_method)(term=ode_term)
+        ode_step_controller = torchode.IntegralController(
+            atol=1e-9, rtol=1e-7, term=ode_term)
+        ode_integrator = torchode.AutoDiffAdjoint(
+            ode_step_method, ode_step_controller)
+        self._ode_integrator = torch.compile(ode_integrator)
 
     def eval(self, eval_data: list[TimeSeries] | None = None,
              t_eval: np.ndarray | list[np.ndarray] | None = None,
              x0_eval: np.ndarray | list[np.ndarray] | None = None,
              ref_data: list[TimeSeries] | None = None,
-             solver_backend: Literal['torchdiffeq', 'scipy'] = 'torchdiffeq',
-             solver_kwargs: dict | None = None,
+             integrator_backend:
+             Literal['torchdiffeq', 'scipy'] = 'torchdiffeq',
+             integrator_kwargs: dict | None = None,
+             torchode_step_method: Literal['Dopri5', 'Tsit5'] = 'Dopri5',
              sub_modules: str | list[str] | None = None,
              verbose: bool = False, show_progress=False, **kwargs) -> None:
         """Evaluate the learned model on some data.
@@ -969,10 +1019,13 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             ref_data (list[TimeSeries] | None): list of reference time series
                 to be used for evaluating performance metrics. Default is
                 `None`.
-            solver_backend (Literal['torchdiffeq', 'scipy']): backend of ODE
-                solver. Default is `torchdiffeq`.
-            solver_kwargs (dict | None): additional keyword arguments for ODE
-                solver. `t_eval` is ignored. Default is `None`.
+            integrator_backend (Literal['scipy', 'torchdiffeq', 'torchode']):
+                backend of ODE integrator. Default is `scipy`.
+            integrator_kwargs (dict | None): additional keyword arguments for
+                ODE integrator. `t_eval` is ignored. Default is `None`.
+            torchode_step_method (Literal['Dopri5', 'Tsit5']): type of ODE
+                integration method from `torchode`. Only used if
+                `integrator_backend` is `torchode`. Default is `Dopri5`.
             sub_modules (str | list[str] | None): name(s) of sub-modules to
                 be evaluated in addition to the main module. Outputs from sub-
                 modules are stored in `sub_pred_data`, a dict mapping sub-
@@ -1006,13 +1059,18 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             ref_data = eval_data
         self._eval_metrics = {}
 
+        if integrator_backend == 'torchode':
+            self._get_torch_ode_integrator(
+                self._model, step_method=torchode_step_method)
+
         self._model.eval()
         with torch.no_grad():
             dataloader = get_dataloader(eval_data, 1, dtype=self._torch_dtype,
                                         shuffle=False)
             self._eval(dataloader, self._pred_data,
-                       solver_backend=solver_backend,
-                       solver_kwargs=solver_kwargs, sub_modules=sub_modules,
+                       integrator_backend=integrator_backend,
+                       integrator_kwargs=integrator_kwargs,
+                       sub_modules=sub_modules,
                        sub_pred_data=self._sub_pred_data, verbose=verbose,
                        show_progress=show_progress)
 
@@ -1024,8 +1082,9 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             self.print_eval_metrics()
 
     def _eval(self, dataloader: TorchDataLoader, pred_data: list[TimeSeries],
-              solver_backend: Literal['torchdiffeq', 'scipy'] = 'torchdiffeq',
-              solver_kwargs: dict | None = None,
+              integrator_backend:
+              Literal['scipy', 'torchdiffeq', 'torchode'] = 'torchdiffeq',
+              integrator_kwargs: dict | None = None,
               sub_modules: str | list[str] | None = None,
               sub_pred_data: dict[str, list[np.ndarray]] | None = None,
               verbose: bool = False, show_progress: bool = False, **kwargs
@@ -1036,10 +1095,10 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             dataloader (torch.utils.data.DataLoader): PyTorch dataloader for
                 evaluation data.
             pred_data (list[TimeSeries]): list to store predicted time series.
-            solver_backend (Literal['torchdiffeq', 'scipy']): backend of ODE
-                solver. Default is `torchdiffeq`.
-            solver_kwargs (dict | None): additional keyword arguments for ODE
-                solver. `t_eval` is ignored. Default is `None`.
+            integrator_backend (Literal['scipy', 'torchdiffeq', 'torchode']):
+                backend of ODE integrator. Default is `scipy`.
+            integrator_kwargs (dict | None): additional keyword arguments for
+                ODE integrator. `t_eval` is ignored. Default is `None`.
             sub_modules (str | list[str] | None): name(s) of sub-modules to
                 be evaluated in addition to the main module. Outputs from sub-
                 modules are stored in `sub_pred_data`, a dict mapping sub-
@@ -1056,12 +1115,12 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             raise ValueError('sub_pred_data must be provided if sub_modules'
                              ' is provided')
 
-        if solver_kwargs is None:
-            solver_kwargs = {}
+        if integrator_kwargs is None:
+            integrator_kwargs = {}
         else:
-            solver_kwargs = solver_kwargs.copy()
-            # ignore existing t_eval in solver_kwargs
-            solver_kwargs.pop('t_eval', None)
+            integrator_kwargs = integrator_kwargs.copy()
+            # ignore existing t_eval in integrator_kwargs
+            integrator_kwargs.pop('t_eval', None)
 
         def _scipy_ode_func(t_, x_):
             t_ = torch.as_tensor(t_, dtype=self._torch_dtype)
@@ -1070,31 +1129,40 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             return self._model(t_, x_).numpy()
 
         for t, x in tqdm.tqdm(dataloader, disable=not show_progress):
-            t = t.squeeze()
-            x = x.squeeze()
+            t = t[0, ...]
+            x = x[0, ...]
             t_np = t.numpy()
             x_np = x.numpy()
 
-            is_solver_successful = True
+            is_integrator_successful = True
 
-            if solver_backend == 'scipy':
+            # TODO: implement with torchode
+            if integrator_backend == 'torchdiffeq':
+                x_pred = tdf_odeint(
+                    self._model, x[0, :], t, **integrator_kwargs)
+                pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
+            elif integrator_backend == 'torchode':
+                ivp_problem = torchode.InitialValueProblem(
+                    y0=x[None, 0, :], t_eval=t[None, :])
+                ivp_solution = self._ode_integrator.solve(
+                    ivp_problem, **integrator_kwargs)
+                x_pred = ivp_solution.ys[0, ...]
+                pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
+            else:  # integrator_backend == 'scipy'
                 ivp_solution = solve_ivp(
                     _scipy_ode_func, (t_np[0], t_np[-1]), x_np[0, :],
-                    t_eval=t_np, **solver_kwargs)
+                    t_eval=t_np, **integrator_kwargs)
 
-                is_solver_successful = ivp_solution.success
-                if is_solver_successful:
+                is_integrator_successful = ivp_solution.success
+                if is_integrator_successful:
                     x_pred = ivp_solution.y.T
                     pred_data.append(TimeSeries(t_np, x_pred))
-                    x_pred = torch.tensor(x_pred).float()
+                    x_pred = torch.tensor(x_pred, dtype=self._torch_dtype)
                 else:
                     pred_data.append(None)
-            else:  # solver_backend == 'torchdiffeq'
-                x_pred = odeint(self._model, x[0, :], t, **solver_kwargs)
-                pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
 
             # compute results for sub-modules
-            if is_solver_successful and sub_modules is not None:
+            if is_integrator_successful and sub_modules is not None:
                 for module_name in sub_modules:
                     module = getattr(self._model, module_name)
                     module_pred = module(t, x_pred).numpy()
@@ -1183,6 +1251,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         if backend == 'custom':
             raise NotImplementedError('custom SINDy not implemented yet')
 
+        # initialize SINDy learning
         self._backend = backend
         self._normalize_columns = normalize_columns
 
@@ -1215,12 +1284,20 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
 
         if learn_dx:
             dx = [ts.dx for ts in self._train_data]
-            self._model.fit(x, t=t, x_dot=dx, multiple_trajectories=True)
+
+            if all(np.array_equal(t[0], t_i) for t_i in t) \
+                    and all(np.array_equal(dx[0], dx_i) for dx_i in dx):
+                # fit one sample only if all time series share the same time
+                # points and dx's are equal
+                self._model.fit(x[0], t=t[0], x_dot=dx[0])
+            else:
+                self._model.fit(x, t=t, x_dot=dx, multiple_trajectories=True)
         else:
             self._model.fit(x, t=t, multiple_trajectories=True)
 
         self._is_trained = True
 
+        # validate learned ODEs
         if valid_data is not None:
             if verbose:
                 print('Validating learned ODEs...', flush=True)
@@ -1388,7 +1465,13 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         metrics = {}
 
         for ts_ref, ts_pred in zip(ref_data, pred_data):
-            if ts_pred is None:
+            if ts_pred is None or len(ts_pred) == 0:
+                continue
+
+            # prediction data contains values only at t[0] but reference data
+            # has more
+            if (len(ts_pred) == 1 and len(ts_ref) > 1
+                    and ts_pred.t[0] in ts_ref.t):
                 continue
 
             ts_ref, ts_pred = align_time_series(ts_ref, ts_pred)

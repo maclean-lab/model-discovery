@@ -42,8 +42,13 @@ def get_args():
     arg_parser.add_argument('--num_epochs', type=int, default=10,
                             help='Number of epochs to train for each '
                             'combination of hyperparameters')
-    arg_parser.add_argument('--compile_model', action='store_true',
-                            help='Compile the UDE model before training')
+    arg_parser.add_argument('--integrator_backend', type=str,
+                            default='torchdiffeq',
+                            choices=['torchdiffeq', 'torchode'],
+                            help='Backend to use for ODE integration')
+    arg_parser.add_argument('--torchode_step_method', type=str,
+                            default='Dopri5', choices=['Dopri5', 'Tsit5'],
+                            help='Step method to use for torchode')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
 
@@ -102,6 +107,7 @@ def main():
     window_sizes = args.window_sizes
     batch_sizes = args.batch_sizes
     num_epochs = args.num_epochs
+    integrator_backend = args.integrator_backend
     model_metrics = pd.DataFrame(
         columns=['learning_rate', 'window_size', 'batch_size', 'best_epoch',
                  'best_valid_loss'])
@@ -114,6 +120,8 @@ def main():
     print('- Learning rates:', learning_rates, flush=True)
     print('- Window sizes:', window_sizes, flush=True)
     print('- Batch sizes:', batch_sizes, flush=True)
+    print('Number of epochs:', num_epochs, flush=True)
+    print('Integrator backend:', integrator_backend, flush=True)
     print(stdout_delim, flush=True)
 
     # train for different combinations of hyperparameters
@@ -128,13 +136,16 @@ def main():
         # train the model
         hybrid_dynamics = get_hybrid_dynamics(
             growth_rates, num_hidden_neurons=args.num_hidden_neurons,
-            activation=args.activation, compile_model=args.compile_model)
+            activation=args.activation)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
         ts_learner = NeuralDynamicsLearner(train_sample, output_dir,
                                            output_prefix)
         ts_learner.train(hybrid_dynamics, loss_func, optimizer, lr, ws, bs,
-                         num_epochs, seed=seed, valid_data=valid_sample,
-                         valid_kwargs={'solver_backend': 'scipy',
+                         num_epochs, seed=seed,
+                         integrator_backend=integrator_backend,
+                         torchode_step_method=args.torchode_step_method,
+                         valid_data=valid_sample,
+                         valid_kwargs={'integrator_backend': 'scipy',
                                        'verbose': False},
                          save_epoch_model=True, verbose=verbose,
                          show_progress=verbose)
@@ -152,10 +163,9 @@ def main():
         # evaluate the best model on training data
         best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
         ts_learner.load_model(hybrid_dynamics, best_epoch_model_suffix)
-        ts_learner.eval(eval_data=train_sample, sub_modules=['latent'],
-                        solver_backend='scipy',
-                        solver_kwargs={'method': 'LSODA'},
-                        show_progress=False)
+        ts_learner.eval(eval_data=train_sample, integrator_backend='scipy',
+                        integrator_kwargs={'method': 'LSODA'},
+                        sub_modules=['latent'], show_progress=False)
         ts_learner.plot_pred_data()
         print('Saved plots of dynamics predicted by the best model',
               flush=True)

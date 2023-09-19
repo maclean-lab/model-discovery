@@ -256,8 +256,9 @@ class DynamicalModel(metaclass=ABCMeta):
             if noise_level > 0:
                 # generate a noisy observation
                 x_noise = rng.normal(
-                    size=(self._t.size, x.shape[1])) * noise_scale
-                x_obs = x + x_noise
+                    size=(self._t.size - 1, x.shape[1])) * noise_scale
+                x_obs = x.copy()
+                x_obs[1:, :] += x_noise
             else:
                 # use the clean data as observation
                 x_obs = x

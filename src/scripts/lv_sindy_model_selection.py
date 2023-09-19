@@ -25,16 +25,17 @@ def search_time_steps(search_config, verbose=False):
 
     for t_step in search_config['t_ude_steps']:
         print(f'Generating UDE dynamics on t_step {t_step:.03f} for SINDy '
-              'training...',
-              flush=True)
+              'training...', flush=True)
         t_train_sindy = [np.arange(t_train_span[0], t_train_span[1] + 1e-8,
                                    t_step)
                          for _ in range(train_sample_size)]
         x0_train = [ts.x[0, :] for ts in train_sample]
         ts_learner.output_prefix = f't_step_{t_step:.2f}_ude'
         ts_learner.eval(t_eval=t_train_sindy, x0_eval=x0_train,
-                        sub_modules=['latent'], ref_data=train_sample,
-                        verbose=verbose, show_progress=False)
+                        ref_data=train_sample, integrator_backend='scipy',
+                        integrator_kwargs={'method': 'LSODA'},
+                        sub_modules=['latent'], verbose=verbose,
+                        show_progress=False)
         ts_learner.plot_pred_data(ref_data=train_sample)
 
         sindy_train_sample = []
@@ -45,13 +46,12 @@ def search_time_steps(search_config, verbose=False):
 
             # cut off some initial and final time points
             if len(ts) > 20:
-                ts = ts[5:-5]
+                ts = ts[10:]
 
             sindy_train_sample.append(ts)
 
         print('UDE dynamics generated')
-        stdout_delim = '\n' + '=' * 60 + '\n'
-        print(stdout_delim, flush=True)
+        print_horizontal_line()
 
         search_basis(search_config, sindy_train_sample, {'t_step': t_step},
                      verbose=verbose)
@@ -182,8 +182,7 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
     print('Saved plots of dynamics predicted by the learned SINDy model',
           flush=True)
 
-    stdout_delim = '\n' + '=' * 60 + '\n'
-    print(stdout_delim, flush=True)
+    print_horizontal_line()
 
 
 def get_args():
@@ -218,6 +217,11 @@ def check_upper_bound(t, x, model):
     return float(np.all(x < 20.0))
 
 
+def print_horizontal_line():
+    horizontal_line = '\n' + '=' * 60 + '\n'
+    print(horizontal_line, flush=True)
+
+
 def main():
     args = get_args()
     verbose = args.verbose
@@ -249,8 +253,7 @@ def main():
     print('Validation sample size:', len(valid_sample), flush=True)
     print('Test sample size:', len(valid_sample), flush=True)
 
-    stdout_delim = '\n' + '=' * 60 + '\n'
-    print(stdout_delim, flush=True)
+    print_horizontal_line()
 
     # load learned UDE model
     print('Loading UDE model with lowest validation loss...', flush=True)
@@ -340,7 +343,7 @@ def main():
     search_config['stop_events'] = [check_upper_bound, check_lower_bound]
 
     print('SINDy model selection setup finished', flush=True)
-    print(stdout_delim, flush=True)
+    print_horizontal_line()
 
     search_time_steps(search_config, verbose=verbose)
     print('Search completed', flush=True)
