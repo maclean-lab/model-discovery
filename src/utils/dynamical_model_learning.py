@@ -946,7 +946,6 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                 Default is `False`.
         """
         for t, x in tqdm.tqdm(dataloader, disable=not show_progress):
-            loss = 0
             optimizer.zero_grad()
 
             if self._integrator_backend == 'torchode':
@@ -955,9 +954,13 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                 ivp_solution = self._ode_integrator.solve(ivp_problem)
                 loss = self._loss_func(x, ivp_solution.ys)
             else:  # self._integrator_backend == 'torchdiffeq'
+                loss = torch.tensor([0.0], dtype=self._torch_dtype,
+                                    requires_grad=True)
+
                 for i in range(self._batch_size):
                     x_out = tdf_odeint(self._model, x[i, 0, :], t[i, :])
                     loss += self._loss_func(x[i, ...], x_out)
+
                 loss /= self._batch_size
 
             loss.backward()
