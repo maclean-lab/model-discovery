@@ -1284,14 +1284,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
 
         if learn_dx:
             dx = [ts.dx for ts in self._train_data]
-
-            if all(np.array_equal(t[0], t_i) for t_i in t) \
-                    and all(np.array_equal(dx[0], dx_i) for dx_i in dx):
-                # fit one sample only if all time series share the same time
-                # points and dx's are equal
-                self._model.fit(x[0], t=t[0], x_dot=dx[0])
-            else:
-                self._model.fit(x, t=t, x_dot=dx, multiple_trajectories=True)
+            self._model.fit(x, t=t, x_dot=dx, multiple_trajectories=True)
         else:
             self._model.fit(x, t=t, multiple_trajectories=True)
 

@@ -264,6 +264,8 @@ def get_dataloader(
             information. Defaults to 'sample'.
         dtype (type, optional): data type of the time series. Defaults to
             torch.float32.
+        shuffle (bool, optional): whether to shuffle observations in the
+            dataset. Defaults to True.
     """
     dataset = TimeSeriesDataset(
         data, window_size=window_size, window_order=window_order, dtype=dtype)

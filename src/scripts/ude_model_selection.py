@@ -10,14 +10,38 @@ import h5py
 
 from time_series_data import load_sample_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
-from lotka_volterra_model import get_hybrid_dynamics
+import lotka_volterra_model
+import repressilator_model
+
+
+def get_model_module(model_name):
+    match model_name:
+        case 'lotka_volterra':
+            return lotka_volterra_model
+        case 'repressilator':
+            return repressilator_model
+        case _:
+            raise ValueError(f'Unknown model name: {model_name}')
+
+
+def get_model_prefix(model_name):
+    match model_name:
+        case 'lotka_volterra':
+            return 'lv'
+        case 'repressilator':
+            return 'rep'
+        case _:
+            raise ValueError(f'Unknown model name: {model_name}')
 
 
 def get_args():
     """Get arguments from command line."""
     arg_parser = ArgumentParser(
-        description='Find the best UDE model that fits noisy data from the '
-        'Lotka-Volterra model.')
+        description='Find the best UDE model that fits noisy data.')
+    arg_parser.add_argument('--model', type=str, required=True,
+                            choices=['lotka_volterra', 'repressilator'],
+                            help='Dynamical Model from which data is '
+                            'generated')
     arg_parser.add_argument('--noise_level', type=float, default=0.01,
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
@@ -31,7 +55,7 @@ def get_args():
                             help='Activation function for the latent network'
                             ' in the UDE model')
     arg_parser.add_argument('--learning_rates', nargs='+', type=float,
-                            default=[1e-1, 1e-2, 1e-3],
+                            default=[1e-1, 1e-2],
                             help='Learning rates to search over')
     arg_parser.add_argument('--window_sizes', nargs='+', type=int,
                             default=[5, 10],
@@ -43,7 +67,7 @@ def get_args():
                             help='Number of epochs to train for each '
                             'combination of hyperparameters')
     arg_parser.add_argument('--integrator_backend', type=str,
-                            default='torchdiffeq',
+                            default='torchode',
                             choices=['torchdiffeq', 'torchode'],
                             help='Backend to use for ODE integration')
     arg_parser.add_argument('--torchode_step_method', type=str,
@@ -60,6 +84,8 @@ def main():
     verbose = args.verbose
 
     # load data
+    dynamical_model = get_model_module(args.model)
+    model_prefix = get_model_prefix(args.model)
     noise_level = args.noise_level
     seed = args.seed
     print(f'Loading data with {noise_level} noise level and seed '
@@ -68,12 +94,11 @@ def main():
         os.path.join(os.path.dirname(__file__), '..', '..'))
     data_path = os.path.join(
         project_root, 'data',
-        f'lv_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
+        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
-    growth_rates = np.array([params_true[0], -params_true[3]])
     t_train_span = data_fd['train'].attrs['t_span']
-    train_sample = load_sample_from_h5(data_fd, 'train')[:50]
+    train_sample = load_sample_from_h5(data_fd, 'train')
     valid_sample = load_sample_from_h5(data_fd, 'valid')
     data_fd.close()
     print('Data loaded', flush=True)
@@ -84,13 +109,14 @@ def main():
     print('Training sample size:', len(train_sample), flush=True)
     print('Validation sample size:', len(valid_sample), flush=True)
 
-    stdout_delim = '\n' + '=' * 60 + '\n'
-    print(stdout_delim, flush=True)
+    stdout_hrule = '\n' + '=' * 60 + '\n'
+    print(stdout_hrule, flush=True)
 
     # set up for output files
     print('Setting up training...', flush=True)
     output_dir = os.path.join(
-        project_root, 'outputs', f'lv-{int(t_train_span[1])}s-ude-')
+        project_root, 'outputs',
+        f'{model_prefix}-{int(t_train_span[1])}s-ude-')
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
@@ -122,7 +148,7 @@ def main():
     print('- Batch sizes:', batch_sizes, flush=True)
     print('Number of epochs:', num_epochs, flush=True)
     print('Integrator backend:', integrator_backend, flush=True)
-    print(stdout_delim, flush=True)
+    print(stdout_hrule, flush=True)
 
     # train for different combinations of hyperparameters
     for lr, ws, bs in itertools.product(learning_rates, window_sizes,
@@ -134,9 +160,16 @@ def main():
         print(f'- Number of epochs: {num_epochs}', flush=True)
 
         # train the model
-        hybrid_dynamics = get_hybrid_dynamics(
-            growth_rates, num_hidden_neurons=args.num_hidden_neurons,
-            activation=args.activation)
+        match args.model:
+            case 'lotka_volterra':
+                growth_rates = np.array([params_true[0], -params_true[3]])
+                hybrid_dynamics = dynamical_model.get_hybrid_dynamics(
+                    growth_rates, num_hidden_neurons=args.num_hidden_neurons,
+                    activation=args.activation)
+            case 'repressilator':
+                hybrid_dynamics = dynamical_model.get_hybrid_dynamics(
+                    num_hidden_neurons=args.num_hidden_neurons,
+                    activation=args.activation)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
         ts_learner = NeuralDynamicsLearner(train_sample, output_dir,
                                            output_prefix)
@@ -170,7 +203,7 @@ def main():
         print('Saved plots of dynamics predicted by the best model',
               flush=True)
 
-        print(stdout_delim, flush=True)
+        print(stdout_hrule, flush=True)
 
     print('Finished training for all combinations of hyperparameters',
           flush=True)

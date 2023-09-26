@@ -13,6 +13,7 @@ class DynamicalModel(metaclass=ABCMeta):
     _PARAM_NAMES = []
     _DEFAULT_PARAM_VALUES = np.empty(0)
     _DEFAULT_X0 = np.empty(0)
+    _DEFAULT_T_STEP = None
     _DEFAULT_T = np.empty(0)
 
     def __init__(self, param_values: np.ndarray | None = None,
@@ -32,6 +33,10 @@ class DynamicalModel(metaclass=ABCMeta):
             - equations: right-hand side of the ODE system, which has the form
               `f(t, x, p=self._param_values)` and can be used by
               scipy.integrate.solve_ivp to simulate the model
+        The following constants can be optionally defined:
+            - _DEFAULT_T_STEP: default step size of time points, which is
+                needed only when _DEFAULT_T has uniform step size
+
 
         Args:
             param_values (np.ndarray | None, optional): model parameters.
@@ -56,9 +61,20 @@ class DynamicalModel(metaclass=ABCMeta):
 
         if t is None:
             self._t = self._DEFAULT_T.copy()
+            self._t_step = self._DEFAULT_T_STEP
         else:
             self.__check_t(t)
             self._t = t.copy()
+
+            # set self._t_step if t has uniform step size
+            if self._t.size == 1:
+                self._t_step = None
+            elif self._t.size == 2:
+                self._t_step = self._t[1] - self._t[0]
+            elif self._t.size > 2:
+                t_diff = self._t[1:] - self._t[:-1]
+                if np.all(t_diff == t_diff[0]):
+                    self._t_step = t_diff[0]
 
     def __check_params(self, param_values: np.ndarray):
         """Check if the input parameters are valid.
@@ -172,6 +188,10 @@ class DynamicalModel(metaclass=ABCMeta):
     def t_span(self) -> tuple[float, float]:
         return (self._t[0], self._t[-1])
 
+    @property
+    def t_step(self) -> float | None:
+        return self._t_step
+
     @classmethod
     def get_num_variables(cls) -> int:
         return cls._NUM_VARIABLES
@@ -196,8 +216,12 @@ class DynamicalModel(metaclass=ABCMeta):
     def get_default_t_span(cls) -> tuple[float, float]:
         return (cls._DEFAULT_T[0], cls._DEFAULT_T[-1])
 
-    def simulate(self, t_span: tuple[float, float], x0: np.ndarray, **kwargs
-                 ) -> TimeSeries:
+    @classmethod
+    def get_default_t_step(cls) -> float | None:
+        return cls._DEFAULT_T_STEP
+
+    def simulate(self, t_span: tuple[float, float], x0: np.ndarray,
+                 **kwargs) -> TimeSeries:
         """Simulate the model given time span and initial conditions.
 
         Args:
@@ -224,6 +248,7 @@ class DynamicalModel(metaclass=ABCMeta):
         return TimeSeries(solution.t, solution.y.T)
 
     def get_sample(self, sample_size: int, noise_level: float = 0.0,
+                   bounds: list[tuple[float, float]] | None = None,
                    rng: Optional[np.random.Generator] = None,
                    ) -> list[TimeSeries]:
         """Generate a sample of noisy time series from the model.
@@ -233,6 +258,9 @@ class DynamicalModel(metaclass=ABCMeta):
         Args:
             sample_size (int): the number of time series in the sample.
             noise_level (float, optional): the level of noise. Defaults to 0.0.
+            bounds (list[tuple[float, float]] | None, optional): lower and
+                upper bounds of generated values for each variable. Defaults to
+                None, in which case no bounds are imposed.
             rng (Optional[np.random.Generator], optional): a random number
                 generator. Defaults to None.
 
@@ -240,6 +268,26 @@ class DynamicalModel(metaclass=ABCMeta):
             list[TimeSeries]: a list of noisy time series generated from the
                 model (clean if noise_level is set 0.0).
         """
+        # check lower and upper bounds
+        if bounds is None:
+            bounds = [(None, None)] * self._NUM_VARIABLES
+        elif len(bounds) != self._NUM_VARIABLES:
+            raise ValueError('bounds must have the same length as the number '
+                             'of variables')
+        else:
+            for i, (lb, ub) in enumerate(bounds):
+                if lb is not None and ub is not None and lb >= ub:
+                    msg = f'lower bound of variable {i} must be smaller than '
+                    msg += 'its upper bound'
+                    raise ValueError(msg)
+
+                processed_bounds = [None, None]
+                if lb is not None and np.isfinite(lb):
+                    processed_bounds[0] = lb
+                if ub is not None and np.isfinite(ub):
+                    processed_bounds[1] = ub
+                bounds[i] = tuple(processed_bounds)
+
         # get clean data
         t_span = (self._t[0], self._t[-1])
         x = self.simulate(t_span, self._x0, t_eval=self._t).x
@@ -252,6 +300,7 @@ class DynamicalModel(metaclass=ABCMeta):
             rng = np.random.default_rng()
 
         # generate sample
+        # TODO: bound generated data to a certain range
         for _ in range(sample_size):
             if noise_level > 0:
                 # generate a noisy observation
@@ -263,6 +312,12 @@ class DynamicalModel(metaclass=ABCMeta):
                 # use the clean data as observation
                 x_obs = x
 
+            # clip values to bounds
+            for i, (lb, ub) in enumerate(bounds):
+                if lb is not None or ub is not None:
+                    x_obs[:, i] = np.clip(x_obs[:, i], lb, ub)
+
+            # add observation to sample
             ts_sample.append(TimeSeries(self._t, x_obs))
 
         return ts_sample
@@ -344,43 +399,6 @@ class EcosystemModelAlt(DynamicalModel):
             dx[0] = p[0] * x[0] * (1 - x[0] - x[1]) - p[2] * x[0]
             dx[1] = p[1] * x[0] * (1 - x[2]) - p[3] * x[1]
             dx[2] = p[3] * x[1] - p[4] * x[2]
-
-            return dx
-
-        return _f
-
-
-class RepressilatorModel(DynamicalModel):
-    _NUM_VARIABLES = 3
-    _PARAM_NAMES = ['beta', 'n']
-    _DEFAULT_PARAM_VALUES = np.array([10.0, 3])
-    _DEFAULT_X0 = np.array([1.0, 1.0, 1.2])
-    _DEFAULT_T = np.arange(0.0, 10.0 + 1e-8, 0.2)
-
-    def __init__(self, param_values: np.ndarray | None = None,
-                 x0: np.ndarray | None = None, t: np.ndarray | None = None
-                 ) -> None:
-        """The repressilator model from Elowitz and Leibler (2000), protein-
-        only version.
-
-        See here for more details:
-        http://be150.caltech.edu/2020/content/lessons/08_repressilator.html
-
-        Args:
-            param_values (np.ndarray | None, optional): values of model
-                parameters, namely beta and n.  Defaults parameter values are
-                beta = 10.0, n = 3.
-        """
-        super().__init__(param_values, x0, t)
-
-    @property
-    def equations(self) -> Callable:
-        def _f(t, x, p=self._param_values):
-            dx = np.empty(3)
-
-            dx[0] = p[0] / (1 + x[2] ** p[1]) - x[0]
-            dx[1] = p[0] / (1 + x[0] ** p[1]) - x[1]
-            dx[2] = p[0] / (1 + x[1] ** p[1]) - x[2]
 
             return dx
 
