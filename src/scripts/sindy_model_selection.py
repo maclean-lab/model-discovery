@@ -310,7 +310,7 @@ def main():
     # set up for SINDy model selection
     output_dir = os.path.join(
         os.path.split(output_dir)[0],
-        f'noise-{noise_level:.3f}-seed-{seed:04d}-sindy-model-selection-test')
+        f'noise-{noise_level:.3f}-seed-{seed:04d}-sindy-model-selection')
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

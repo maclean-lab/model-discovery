@@ -55,7 +55,7 @@ def get_args():
                             help='Activation function for the latent network'
                             ' in the UDE model')
     arg_parser.add_argument('--learning_rates', nargs='+', type=float,
-                            default=[1e-1, 1e-2],
+                            default=[1e-3, 1e-2, 1e-1],
                             help='Learning rates to search over')
     arg_parser.add_argument('--window_sizes', nargs='+', type=int,
                             default=[5, 10],
