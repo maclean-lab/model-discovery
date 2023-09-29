@@ -948,6 +948,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
         for t, x in tqdm.tqdm(dataloader, disable=not show_progress):
             optimizer.zero_grad()
 
+            # integrate on training data and compute loss
             if self._integrator_backend == 'torchode':
                 ivp_problem = torchode.InitialValueProblem(
                     y0=x[:, 0, :], t_eval=t)
@@ -963,9 +964,13 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
                 loss /= self._batch_size
 
-            loss.backward()
-            optimizer.step()
-            self._training_losses.append(loss.item())
+            # backpropagate and update parameters
+            if loss.requires_grad:
+                loss.backward()
+                optimizer.step()
+                self._training_losses.append(loss.item())
+            else:
+                self._training_losses.append(np.nan)
 
     def _get_torch_ode_integrator(
             self, model: nn.Module,

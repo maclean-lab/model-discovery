@@ -10,28 +10,7 @@ import h5py
 
 from time_series_data import load_sample_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
-import lotka_volterra_model
-import repressilator_model
-
-
-def get_model_module(model_name):
-    match model_name:
-        case 'lotka_volterra':
-            return lotka_volterra_model
-        case 'repressilator':
-            return repressilator_model
-        case _:
-            raise ValueError(f'Unknown model name: {model_name}')
-
-
-def get_model_prefix(model_name):
-    match model_name:
-        case 'lotka_volterra':
-            return 'lv'
-        case 'repressilator':
-            return 'rep'
-        case _:
-            raise ValueError(f'Unknown model name: {model_name}')
+from model_helpers import get_model_module, get_model_prefix, print_hrule
 
 
 def get_args():
@@ -84,12 +63,11 @@ def main():
     verbose = args.verbose
 
     # load data
-    dynamical_model = get_model_module(args.model)
+    model_module = get_model_module(args.model)
     model_prefix = get_model_prefix(args.model)
     noise_level = args.noise_level
     seed = args.seed
-    print(f'Loading data with {noise_level} noise level and seed '
-          f'{seed:04d}...', flush=True)
+    print('Loading data...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
     data_path = os.path.join(
@@ -101,16 +79,18 @@ def main():
     train_sample = load_sample_from_h5(data_fd, 'train')
     valid_sample = load_sample_from_h5(data_fd, 'valid')
     data_fd.close()
-    print('Data loaded', flush=True)
+    print('Data loaded:', flush=True)
+    print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
-    print(f'True parameter value: [{param_str}]', flush=True)
+    print(f'- True parameter value: [{param_str}]', flush=True)
+    print(f'- Noise level: {noise_level}', flush=True)
+    print(f'- RNG seed: {seed}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
-    print(f'Time span of training data: ({t_span_str})', flush=True)
-    print('Training sample size:', len(train_sample), flush=True)
-    print('Validation sample size:', len(valid_sample), flush=True)
+    print(f'- Time span of training data: ({t_span_str})', flush=True)
+    print(f'- Training sample size: {len(train_sample)}', flush=True)
+    print(f'- Validation sample size: {len(valid_sample)}', flush=True)
 
-    stdout_hrule = '\n' + '=' * 60 + '\n'
-    print(stdout_hrule, flush=True)
+    print_hrule()
 
     # set up for output files
     print('Setting up training...', flush=True)
@@ -148,7 +128,7 @@ def main():
     print('- Batch sizes:', batch_sizes, flush=True)
     print('Number of epochs:', num_epochs, flush=True)
     print('Integrator backend:', integrator_backend, flush=True)
-    print(stdout_hrule, flush=True)
+    print_hrule()
 
     # train for different combinations of hyperparameters
     for lr, ws, bs in itertools.product(learning_rates, window_sizes,
@@ -163,11 +143,11 @@ def main():
         match args.model:
             case 'lotka_volterra':
                 growth_rates = np.array([params_true[0], -params_true[3]])
-                hybrid_dynamics = dynamical_model.get_hybrid_dynamics(
+                hybrid_dynamics = model_module.get_hybrid_dynamics(
                     growth_rates, num_hidden_neurons=args.num_hidden_neurons,
                     activation=args.activation)
             case 'repressilator':
-                hybrid_dynamics = dynamical_model.get_hybrid_dynamics(
+                hybrid_dynamics = model_module.get_hybrid_dynamics(
                     num_hidden_neurons=args.num_hidden_neurons,
                     activation=args.activation)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
@@ -203,7 +183,7 @@ def main():
         print('Saved plots of dynamics predicted by the best model',
               flush=True)
 
-        print(stdout_hrule, flush=True)
+        print_hrule()
 
     print('Finished training for all combinations of hyperparameters',
           flush=True)

@@ -6,28 +6,7 @@ import numpy as np
 from numpy.random import default_rng
 import h5py
 
-from lotka_volterra_model import LotkaVolterraModel
-from repressilator_model import RepressilatorModel
-
-
-def get_model_type(model_name):
-    match model_name:
-        case 'lotka_volterra':
-            return LotkaVolterraModel
-        case 'repressilator':
-            return RepressilatorModel
-        case _:
-            raise ValueError(f'Unknown model name: {model_name}')
-
-
-def get_model_prefix(model_name):
-    match model_name:
-        case 'lotka_volterra':
-            return 'lv'
-        case 'repressilator':
-            return 'rep'
-        case _:
-            raise ValueError(f'Unknown model name: {model_name}')
+from dynamical_model_learning import get_model_type, get_model_prefix
 
 
 def get_args():

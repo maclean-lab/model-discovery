@@ -12,7 +12,7 @@ import h5py
 from time_series_data import load_sample_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from dynamical_model_learning import OdeSystemLearner
-from lotka_volterra_model import get_hybrid_dynamics
+from model_helpers import get_model_module, get_model_prefix, print_hrule
 
 
 def search_time_steps(search_config, verbose=False):
@@ -203,6 +203,10 @@ def get_args():
     arg_parser = ArgumentParser(
         description='Find the best ODE model that fits noisy data from the '
         'Lotka-Volterra model.')
+    arg_parser.add_argument('--model', type=str, required=True,
+                            choices=['lotka_volterra', 'repressilator'],
+                            help='Dynamical Model from which data is '
+                            'generated')
     arg_parser.add_argument('--noise_level', type=float, default=0.01,
                             help='Noise level of training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
@@ -233,40 +237,39 @@ def check_upper_bound(t, x, model):
     return float(np.all(x < 20.0))
 
 
-def print_hrule():
-    print('\n' + '=' * 60 + '\n', flush=True)
-
-
 def main():
     args = get_args()
     verbose = args.verbose
 
     # initialize model and data
+    search_config = {}
     noise_level = args.noise_level
     seed = args.seed
-    print(f'Loading data with {noise_level} noise level and seed '
-          f'{seed:04d}...', flush=True)
+    print('Loading data...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
+    model_prefix = get_model_prefix(args.model)
     data_path = os.path.join(
         project_root, 'data',
-        f'lv_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
+        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
-    growth_rates = np.array([params_true[0], -params_true[3]])
     t_train_span = data_fd['train'].attrs['t_span']
     train_sample = load_sample_from_h5(data_fd, 'train')
     valid_sample = load_sample_from_h5(data_fd, 'valid')
     test_sample = load_sample_from_h5(data_fd, 'test')
     data_fd.close()
-    print('Data loaded', flush=True)
+    print('Data loaded:', flush=True)
+    print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
-    print(f'True parameter value: [{param_str}]', flush=True)
+    print(f'- True parameter value: [{param_str}]', flush=True)
+    print(f'- Noise level: {noise_level}', flush=True)
+    print(f'- RNG seed: {seed}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
-    print(f'Time span of training data: ({t_span_str})', flush=True)
-    print('Training sample size:', len(train_sample), flush=True)
-    print('Validation sample size:', len(valid_sample), flush=True)
-    print('Test sample size:', len(valid_sample), flush=True)
+    print(f'- Time span of training data: ({t_span_str})', flush=True)
+    print(f'- Training sample size: {len(train_sample)}', flush=True)
+    print(f'- Validation sample size: {len(valid_sample)}', flush=True)
+    print(f'- Test sample size: {len(valid_sample)}', flush=True)
 
     print_hrule()
 
@@ -276,7 +279,8 @@ def main():
     print('- Hidden neurons:', args.num_hidden_neurons, flush=True)
     print('- Activation function:', args.activation, flush=True)
     output_dir = os.path.join(
-        project_root, 'outputs', f'lv-{int(t_train_span[1])}s-ude-')
+        project_root, 'outputs',
+        f'{model_prefix}-{int(t_train_span[1])}s-ude-')
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
@@ -299,8 +303,15 @@ def main():
     best_epoch = ude_model_metric.loc[best_ude_row, 'best_epoch']
     output_prefix = f'lr_{learning_rate:.3f}_window_size_{window_size:02d}'
     output_prefix += f'_batch_size_{batch_size:02d}'
-    hybrid_dynamics = get_hybrid_dynamics(
-        growth_rates, args.num_hidden_neurons, args.activation)
+    model_module = get_model_module(args.model)
+    match args.model:
+        case 'lotka_volterra':
+            growth_rates = np.array([params_true[0], -params_true[3]])
+            hybrid_dynamics = model_module.get_hybrid_dynamics(
+                growth_rates, args.num_hidden_neurons, args.activation)
+        case 'repressilator':
+            hybrid_dynamics = model_module.get_hybrid_dynamics(
+                args.num_hidden_neurons, args.activation)
     ts_learner = NeuralDynamicsLearner(train_sample, output_dir, output_prefix)
     ts_learner.load_model(
         hybrid_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
@@ -316,7 +327,6 @@ def main():
         os.makedirs(output_dir)
 
     ts_learner.output_dir = output_dir
-    search_config = {}
     search_config['noise_level'] = noise_level
     search_config['output_dir'] = output_dir
     search_config['t_train_span'] = t_train_span
@@ -326,37 +336,62 @@ def main():
     search_config['valid_sample'] = valid_sample
     search_config['test_sample'] = test_sample
     search_config['t_ude_steps'] = [0.1, 0.05]
-    search_config['basis_libs'] = {
-        'default': None,
-        'higher_order': [
-            lambda x: x ** 2, lambda x, y: x * y, lambda x: x ** 3,
-            lambda x, y: x * x * y, lambda x, y: x * y * y
-        ]
-    }
-    search_config['basis_strs'] = {
-        'default': None,
-        'higher_order': [
-            lambda x: f'{x}^2', lambda x, y: f'{x} {y}', lambda x: f'{x}^3',
-            lambda x, y: f'{x}^2 {y}', lambda x, y: f'{x} {y}^2'
-        ]
-    }
     search_config['sindy_optimizers'] = {'stlsq': STLSQ}
     search_config['sindy_optimizer_args'] = {
         'stlsq': {'alpha': [0.05, 0.1, 0.5, 1.0, 5.0, 10.0]}}
     search_config['rng'] = default_rng(seed)
 
-    search_config['model_metrics'] = pd.DataFrame(
-        columns=[
-            't_step', 'basis', 'basis_normalized', 'optimizer',
-            'optimizer_args', 'mse', 'indiv_mse[0]', 'indiv_mse[1]', 'aicc',
-            'indiv_aicc[0]', 'indiv_aicc[1]', 'recovered_eqs'
-        ])
+    # model specific setup
+    match args.model:
+        case 'lotka_volterra':
+            search_config['basis_libs'] = {
+                'default': None,
+                'higher_order': [
+                    lambda x: x ** 2, lambda x, y: x * y, lambda x: x ** 3,
+                    lambda x, y: x * x * y, lambda x, y: x * y * y
+                ]}
+            search_config['basis_strs'] = {
+                'default': None,
+                'higher_order': [
+                    lambda x: f'{x}^2', lambda x, y: f'{x} {y}',
+                    lambda x: f'{x}^3', lambda x, y: f'{x}^2 {y}',
+                    lambda x, y: f'{x} {y}^2'
+                ]
+            }
 
-    # define recovered hybrid dynamics
-    def recovered_dynamics(t, x, model):
-        return growth_rates * x + model.predict(x[np.newaxis, :])[0]
+            def recovered_dynamics(t, x, model):
+                return growth_rates * x + model.predict(x[np.newaxis, :])[0]
 
-    search_config['recovered_dynamics'] = recovered_dynamics
+            search_config['recovered_dynamics'] = recovered_dynamics
+        case 'repressilator':
+            search_config['basis_libs'] = {
+                'hill': [
+                    lambda x: 1.0 / (1.0 + x),
+                    lambda x: 1.0 / (1.0 + x ** 2),
+                    lambda x: 1.0 / (1.0 + x ** 3)
+                ]}
+            search_config['basis_strs'] = {
+                'hill': [
+                    lambda x: f'1/(1+{x})', lambda x: f'1/(1+{x}^2)',
+                    lambda x: f'1/(1+{x}^3)'
+                ]}
+
+            def recovered_dynamics(t, x, model):
+                return model.predict(x[np.newaxis, :])[0] - x
+
+            search_config['recovered_dynamics'] = recovered_dynamics
+
+    # initialize table for model metrics
+    num_variables = train_sample[0].x.shape[1]
+    model_metric_columns = ['t_step', 'basis', 'basis_normalized', 'optimizer',
+                            'optimizer_args']
+    model_metric_columns.extend(
+        f'indiv_mse[{i}]' for i in range(num_variables))
+    model_metric_columns.append('aicc')
+    model_metric_columns.extend(
+        f'indiv_aicc[{i}]' for i in range(num_variables))
+    model_metric_columns.append('recovered_eqs')
+    search_config['model_metrics'] = pd.DataFrame(columns=model_metric_columns)
 
     check_lower_bound.terminal = True
     check_upper_bound.terminal = True
