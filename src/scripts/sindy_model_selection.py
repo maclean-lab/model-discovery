@@ -296,6 +296,10 @@ def main():
     # get the UDE model with lowest validation loss
     ude_model_metric = pd.read_csv(
         os.path.join(output_dir, 'ude_model_metrics.csv'), index_col=False)
+    if len(ude_model_metric) == 0:
+        print('No UDE model was successfully trained; will not train SINDy'
+              ' models', flush=True)
+        return
     best_ude_row = ude_model_metric['best_valid_loss'].idxmin()
     learning_rate = ude_model_metric.loc[best_ude_row, 'learning_rate']
     window_size = ude_model_metric.loc[best_ude_row, 'window_size']

@@ -477,7 +477,12 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             self._train(dataloader, optimizer, verbose=verbose,
                         show_progress=show_progress, **kwargs)
 
-            # save current model
+            # check if training failed
+            if np.isnan(self._training_losses[-1]):
+                print(f'Training failed at epoch {epoch}', flush=True)
+                break
+
+            # save current model to a file
             if save_epoch_model:
                 state_dict_path = self._output_prefix + \
                     f'_{epoch_model_output_suffix}_epoch_{epoch:03d}.pt'
@@ -919,7 +924,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
         # set up torchode integrator
         if self._integrator_backend == 'torchode':
-            self._get_torch_ode_integrator(model, torchode_step_method)
+            self._get_torchode_integrator(model, torchode_step_method)
 
         super().train(model, loss_func, optimizer_type, learning_rate,
                       window_size, batch_size, num_epochs, dummy_input_mask,
@@ -945,7 +950,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             show_progress (bool): whether to show a progress bar for training.
                 Default is `False`.
         """
-        for t, x in tqdm.tqdm(dataloader, disable=not show_progress):
+        for t, x in (pbar := tqdm.tqdm(dataloader, disable=not show_progress)):
             optimizer.zero_grad()
 
             # integrate on training data and compute loss
@@ -965,14 +970,19 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                 loss /= self._batch_size
 
             # backpropagate and update parameters
+            if show_progress:
+                pbar.set_postfix_str(f'{loss.item():8.6f}')
             if loss.requires_grad:
                 loss.backward()
                 optimizer.step()
                 self._training_losses.append(loss.item())
             else:
                 self._training_losses.append(np.nan)
+                pbar.close()
 
-    def _get_torch_ode_integrator(
+                break  # effectively a return
+
+    def _get_torchode_integrator(
             self, model: nn.Module,
             step_method: Literal['Dopri5', 'Tsit5'] = 'Dopri5') -> None:
         """Get ODE integrator from `torchode`.
@@ -1068,7 +1078,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
         self._eval_metrics = {}
 
         if integrator_backend == 'torchode':
-            self._get_torch_ode_integrator(
+            self._get_torchode_integrator(
                 self._model, step_method=torchode_step_method)
 
         self._model.eval()

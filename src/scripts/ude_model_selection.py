@@ -163,25 +163,30 @@ def main():
                          save_epoch_model=True, verbose=verbose,
                          show_progress=verbose)
         ts_learner.plot_training_losses(output_suffix='training_losses')
-        print('\nTraining of all epochs finished', flush=True)
+        print('\nTraining finished', flush=True)
 
         # save model metrics
-        best_epoch = np.argmin([m['mse'] for m in ts_learner.valid_metrics])
-        best_loss = ts_learner.valid_metrics[best_epoch]['mse']
-        model_info = {'learning_rate': lr, 'window_size': ws, 'batch_size': bs,
-                      'best_epoch': best_epoch, 'best_valid_loss': best_loss}
-        model_metrics.loc[len(model_metrics)] = model_info
-        print('Saved metrics of the best model', flush=True)
+        if len(ts_learner.valid_metrics) > 0:
+            best_epoch = np.argmin(
+                [m['mse'] for m in ts_learner.valid_metrics])
+            best_loss = ts_learner.valid_metrics[best_epoch]['mse']
+            model_info = {'learning_rate': lr, 'window_size': ws,
+                          'batch_size': bs, 'best_epoch': best_epoch,
+                          'best_valid_loss': best_loss}
+            model_metrics.loc[len(model_metrics)] = model_info
+            print('Saved metrics of the best model', flush=True)
 
-        # evaluate the best model on training data
-        best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
-        ts_learner.load_model(hybrid_dynamics, best_epoch_model_suffix)
-        ts_learner.eval(eval_data=train_sample, integrator_backend='scipy',
-                        integrator_kwargs={'method': 'LSODA'},
-                        sub_modules=['latent'], show_progress=False)
-        ts_learner.plot_pred_data()
-        print('Saved plots of dynamics predicted by the best model',
-              flush=True)
+            # evaluate the best model on training data
+            best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
+            ts_learner.load_model(hybrid_dynamics, best_epoch_model_suffix)
+            ts_learner.eval(eval_data=train_sample, integrator_backend='scipy',
+                            integrator_kwargs={'method': 'LSODA'},
+                            sub_modules=['latent'], show_progress=False)
+            ts_learner.plot_pred_data()
+            print('Saved plots of dynamics predicted by the best model',
+                  flush=True)
+        else:
+            print('Training stopped during epoch 0, no model metrics to save')
 
         print_hrule()
 
