@@ -77,7 +77,10 @@ def main():
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
     train_sample = load_sample_from_h5(data_fd, 'train')
-    valid_sample = load_sample_from_h5(data_fd, 'valid')
+    if args.model == 'repressilator':
+        valid_sample = train_sample
+    else:
+        valid_sample = load_sample_from_h5(data_fd, 'valid')
     data_fd.close()
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)

@@ -19,8 +19,6 @@ import tqdm
 
 from time_series_data import TimeSeries, align_time_series, get_dataloader
 
-# TODO: log events, e.g. training, evaluating, plotting
-# TODO: save and load trained models from logs
 # TODO: allow for different extensions for output files (e.g. PDF, PNG)
 
 # alternative colors for plotting time series
@@ -565,7 +563,6 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             verbose (bool): whether to print additional information. Default is
                 `False`.
         """
-        # TODO: save to a log file along with hyperparameters like batch_size
         state_dict_path = os.path.join(
             self.output_dir, f'{self._output_prefix}_{output_suffix}.pt')
         torch.save(self._model.state_dict(), state_dict_path)
@@ -845,7 +842,6 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
         array is the value predicted by the sub-module at all time points,
         namely `pred_data.t`.
         """
-        # TODO: change to dict[str, list[TimeSeries]]?
         if self._sub_pred_data is None:
             return None
 

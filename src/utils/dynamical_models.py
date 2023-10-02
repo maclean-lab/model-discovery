@@ -300,7 +300,6 @@ class DynamicalModel(metaclass=ABCMeta):
             rng = np.random.default_rng()
 
         # generate sample
-        # TODO: bound generated data to a certain range
         for _ in range(sample_size):
             if noise_level > 0:
                 # generate a noisy observation
