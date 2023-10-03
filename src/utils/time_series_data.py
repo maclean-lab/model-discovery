@@ -125,6 +125,11 @@ class TimeSeries:
     def dx(self, dx_new: np.ndarray) -> None:
         self._dx = dx_new.copy()
 
+    @property
+    def num_vars(self) -> int:
+        """int: number of variables in the time series."""
+        return self._x.shape[1]
+
     def copy(self) -> TimeSeries:
         """Return a copy of the time series.
 

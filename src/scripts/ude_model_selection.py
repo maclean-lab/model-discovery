@@ -19,9 +19,9 @@ def get_args():
         description='Find the best UDE model that fits noisy data.')
     arg_parser.add_argument('--model', type=str, required=True,
                             choices=['lotka_volterra', 'repressilator'],
-                            help='Dynamical Model from which data is '
+                            help='Dynamical model from which data is '
                             'generated')
-    arg_parser.add_argument('--noise_level', type=float, default=0.01,
+    arg_parser.add_argument('--noise_level', type=float, required=True,
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
@@ -70,9 +70,10 @@ def main():
     print('Loading data...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
+    # TODO: allow loading data other than raw
     data_path = os.path.join(
         project_root, 'data',
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
+        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}_raw.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
@@ -129,8 +130,11 @@ def main():
     print('- Learning rates:', learning_rates, flush=True)
     print('- Window sizes:', window_sizes, flush=True)
     print('- Batch sizes:', batch_sizes, flush=True)
+    print('Loss functions: MSE', flush=True)
+    print('Optimizer: Adam', flush=True)
     print('Number of epochs:', num_epochs, flush=True)
     print('Integrator backend:', integrator_backend, flush=True)
+
     print_hrule()
 
     # train for different combinations of hyperparameters
@@ -166,10 +170,11 @@ def main():
                          save_epoch_model=True, verbose=verbose,
                          show_progress=verbose)
         ts_learner.plot_training_losses(output_suffix='training_losses')
-        print('\nTraining finished', flush=True)
+        if not verbose:
+            print('\nTraining finished', flush=True)
 
         # save model metrics
-        if len(ts_learner.valid_metrics) > 0:
+        if ts_learner.valid_metrics:
             best_epoch = np.argmin(
                 [m['mse'] for m in ts_learner.valid_metrics])
             best_loss = ts_learner.valid_metrics[best_epoch]['mse']
@@ -193,6 +198,7 @@ def main():
 
         print_hrule()
 
+    # save model metrics for all combinations of hyperparameters
     print('Finished training for all combinations of hyperparameters',
           flush=True)
     model_metrics_path = os.path.join(output_dir, 'ude_model_metrics.csv')

@@ -205,9 +205,9 @@ def get_args():
         'Lotka-Volterra model.')
     arg_parser.add_argument('--model', type=str, required=True,
                             choices=['lotka_volterra', 'repressilator'],
-                            help='Dynamical Model from which data is '
+                            help='Dynamical model from which data is '
                             'generated')
-    arg_parser.add_argument('--noise_level', type=float, default=0.01,
+    arg_parser.add_argument('--noise_level', type=float, required=True,
                             help='Noise level of training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
@@ -251,7 +251,7 @@ def main():
     model_prefix = get_model_prefix(args.model)
     data_path = os.path.join(
         project_root, 'data',
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
+        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}_raw.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']

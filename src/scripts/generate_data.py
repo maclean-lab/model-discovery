@@ -16,7 +16,7 @@ def get_args():
     # get model type first
     arg_parser.add_argument('--model', type=str, required=True,
                             choices=['lotka_volterra', 'repressilator'],
-                            help='Dynamical Model to generate data from')
+                            help='Dynamical model to generate data from')
     args, _ = arg_parser.parse_known_args()
     model_type = get_model_type(args.model)
 
@@ -39,7 +39,7 @@ def get_args():
     default_t_span = model_type.get_default_t_span()
     default_t_step = model_type.get_default_t_step()
     if default_t_step is None:
-        default_t_step = 0.1
+        default_t_step = (default_t_span[1] - default_t_span[0]) / 10
     arg_parser.add_argument('--t_train_span', nargs=2, type=float,
                             default=default_t_span, metavar=('T0', 'T_END'),
                             help='Time span of training data')
@@ -111,7 +111,7 @@ def main():
         os.makedirs(output_dir)
     output_path = os.path.join(
         output_dir,
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}.h5')
+        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}_raw.h5')
 
     with h5py.File(output_path, 'w') as fd:
         # save model parameters

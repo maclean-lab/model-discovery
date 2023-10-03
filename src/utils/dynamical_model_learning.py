@@ -571,7 +571,7 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             print('Model saved', flush=True)
 
     def load_model(self, model: nn.Module, output_suffix: str = 'model_state',
-                   verbose: bool = False) -> None:
+                   verbose: bool = False, **kwargs) -> None:
         """
         Load state dict from a file into the model.
 
@@ -580,6 +580,11 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             output_suffix (str): suffix for the state dict file.
             verbose (bool): whether to print additional information. Default is
                 `False`.
+
+        Keyword Args:
+            input_mask (np.ndarray | Tensor): boolean array as mask for input
+                data that was used to train the model. Required if the model is
+                RNN-based.
         """
         # TODO: load from a log file along with hyperparameters like batch_size
         self._model = model
@@ -587,6 +592,11 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             self.output_dir, f'{self._output_prefix}_{output_suffix}.pt')
         self._model.load_state_dict(torch.load(state_dict_path))
         self._is_trained = True
+
+        if 'input_mask' in kwargs:
+            self._input_mask = torch.as_tensor(kwargs['input_mask'],
+                                               dtype=torch.bool)
+            self._window_size = self._input_mask.numel()
 
         if verbose:
             print('Model loaded', flush=True)
@@ -703,6 +713,13 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
             show_progress (bool): whether to show a progress bar for
                 evaluation. Default is `False`.
         """
+        # reassure that the input mask is valid for autoregressive prediction
+        # as this method will be called from validation during training
+        if method == 'autoregressive' and self._input_mask[-1]:
+            msg = 'autoregressive prediction only works for models' + \
+                'that predict on the last time point in a window'
+            raise RuntimeError(msg)
+
         method_func = getattr(self, f'_eval_{method}')
 
         for t, x in tqdm.tqdm(dataloader, disable=not show_progress):
