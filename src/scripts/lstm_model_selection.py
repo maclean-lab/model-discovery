@@ -114,7 +114,7 @@ def main():
         f'{model_prefix}-{int(t_spans["train"][1])}s-lstm')
     output_dir += f'-{args.num_hidden_features}-{args.num_layers}'
     output_dir = os.path.join(
-        output_dir, f'noise-{noise_level:.3f}-seed-{seed:04d}')
+        output_dir, f'noise-{noise_level:.3f}-seed-{seed:04d}-model-selection')
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

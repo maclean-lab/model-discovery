@@ -25,6 +25,9 @@ def get_args():
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
+    arg_parser.add_argument('--data_source', type=str, default='raw',
+                            help='Source of training data, raw or '
+                            'preprocessed')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
@@ -67,13 +70,14 @@ def main():
     model_prefix = get_model_prefix(args.model)
     noise_level = args.noise_level
     seed = args.seed
+    data_source = args.data_source
     print('Loading data...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
-    # TODO: allow loading data other than raw
     data_path = os.path.join(
         project_root, 'data',
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}_raw.h5')
+        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}'
+        f'_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
@@ -83,6 +87,7 @@ def main():
     else:
         valid_sample = load_sample_from_h5(data_fd, 'valid')
     data_fd.close()
+
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
@@ -94,15 +99,26 @@ def main():
     print(f'- Training sample size: {len(train_sample)}', flush=True)
     print(f'- Validation sample size: {len(valid_sample)}', flush=True)
 
+    # align time span of validation data with that of training data
+    # necessary for data preprocessed by LSTM
+    if len(valid_sample[0]) > len(train_sample[0]):
+        t_idx = np.intersect1d(valid_sample[0].t, train_sample[0].t,
+                               return_indices=True)[1]
+        valid_sample = [vs[t_idx] for vs in valid_sample]
+        print('Validation data has longer time span than training data does;'
+              ' aligned with training data', flush=True)
+
     print_hrule()
 
     # set up for output files
     print('Setting up training...', flush=True)
-    output_dir = os.path.join(
-        project_root, 'outputs',
-        f'{model_prefix}-{int(t_train_span[1])}s-ude-')
+    output_dir = f'{model_prefix}-{int(t_train_span[1])}s-'
+    if data_source != 'raw':
+        output_dir += data_source.replace('_', '-')
+    output_dir += '-ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
+    output_dir = os.path.join(project_root, 'outputs', output_dir)
     output_dir = os.path.join(
         output_dir,
         f'noise-{noise_level:.3f}-seed-{seed:04d}-ude-model-selection')
