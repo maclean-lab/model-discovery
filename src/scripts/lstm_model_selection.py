@@ -242,7 +242,7 @@ def main():
 
             # save samples
             if dataset_type == 'train':
-                sample_data = ts_learner.eval_data
+                sample_data = ts_learner.pred_data
             else:
                 sample_data = samples[dataset_type]
 

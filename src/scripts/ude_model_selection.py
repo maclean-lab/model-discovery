@@ -82,7 +82,9 @@ def main():
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
     train_sample = load_sample_from_h5(data_fd, 'train')
-    if args.model == 'repressilator':
+    # TODO: after getting LSTM results on repressilator, determine whether
+    # to use raw or preprocessed data for validation
+    if args.model == 'repressilator' and data_source == 'raw':
         valid_sample = train_sample
     else:
         valid_sample = load_sample_from_h5(data_fd, 'valid')
@@ -94,6 +96,7 @@ def main():
     print(f'- True parameter value: [{param_str}]', flush=True)
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
+    print(f'- Data source: {data_source}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
     print(f'- Time span of training data: ({t_span_str})', flush=True)
     print(f'- Training sample size: {len(train_sample)}', flush=True)
