@@ -42,7 +42,8 @@ def search_time_steps(search_config, verbose=False):
         ts_learner.output_prefix = f't_step_{t_step:.2f}_ude'
         ts_learner.eval(t_eval=t_train, x0_eval=x0_train,
                         ref_data=train_sample, integrator_backend='scipy',
-                        integrator_kwargs={'method': 'LSODA'},
+                        integrator_kwargs={'method': 'LSODA',
+                                           'min_step': 1e-8},
                         sub_modules=['latent'], verbose=verbose,
                         show_progress=False)
         ts_learner.plot_pred_data(ref_data=train_sample)
@@ -158,8 +159,8 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
     eq_learner = OdeSystemLearner(sindy_train_sample, output_dir,
                                   output_prefix)
     eq_learner.train(optimizer_type=sindy_optimizers[optimizer_name],
-                     threshold=0.1, learn_dx=True,
-                     normalize_columns=normalize_columns,
+                     threshold=search_config['stlsq_threshold'],
+                     learn_dx=True, normalize_columns=normalize_columns,
                      basis_funcs=basis_libs[basis],
                      basis_names=basis_strs[basis],
                      optimizer_kwargs=optimizer_args,
@@ -189,8 +190,10 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
     # evaluate model on test sample
     eq_learner.eval(eval_data=test_sample, eval_func=recovered_dynamics,
                     integrator_kwargs={'args': (eq_learner.model, ),
-                                       'events': stop_events},
-                    verbose=False)
+                                       'method': 'LSODA',
+                                       'events': stop_events,
+                                       'min_step': 1e-8},
+                    verbose=verbose)
     eq_learner.plot_pred_data(output_suffix='pred_data_long')
     print('Saved plots of dynamics predicted by the learned SINDy model',
           flush=True)
@@ -220,7 +223,7 @@ def get_args():
                             help='Activation function for the latent network'
                             ' in the UDE model')
     arg_parser.add_argument('--t_sindy_span', nargs=2, type=float,
-                            default=[0.5, 3.5], metavar=('T0', 'T_END'),
+                            default=[-np.inf, np.inf], metavar=('T0', 'T_END'),
                             help='Time span of SINDy training data')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
@@ -270,6 +273,9 @@ def main():
     print(f'- Training sample size: {len(train_sample)}', flush=True)
     print(f'- Validation sample size: {len(valid_sample)}', flush=True)
     print(f'- Test sample size: {len(valid_sample)}', flush=True)
+
+    if args.model == 'repressilator':
+        test_sample = [ts[:len(ts) // 2] for ts in test_sample]
 
     print_hrule()
 
@@ -334,12 +340,16 @@ def main():
     search_config['noise_level'] = noise_level
     search_config['output_dir'] = output_dir
     search_config['t_train_span'] = t_train_span
-    search_config['t_sindy_span'] = tuple(args.t_sindy_span)
+    t_sindy_span = args.t_sindy_span
+    if t_sindy_span[0] < t_train_span[0]:
+        t_sindy_span[0] = t_train_span[0]
+    if t_sindy_span[1] > t_train_span[1]:
+        t_sindy_span[1] = t_train_span[1]
+    search_config['t_sindy_span'] = tuple(t_sindy_span)
     search_config['ts_learner'] = ts_learner
     search_config['train_sample'] = train_sample
     search_config['valid_sample'] = valid_sample
     search_config['test_sample'] = test_sample
-    search_config['t_ude_steps'] = [0.1, 0.05]
     search_config['sindy_optimizers'] = {'stlsq': STLSQ}
     search_config['sindy_optimizer_args'] = {
         'stlsq': {'alpha': [0.05, 0.1, 0.5, 1.0, 5.0, 10.0]}}
@@ -348,6 +358,8 @@ def main():
     # model specific setup
     match args.model:
         case 'lotka_volterra':
+            search_config['stlsq_threshold'] = 0.1
+            search_config['t_ude_steps'] = [0.1, 0.05]
             search_config['basis_libs'] = {
                 'default': None,
                 'higher_order': [
@@ -368,17 +380,16 @@ def main():
 
             search_config['recovered_dynamics'] = recovered_dynamics
         case 'repressilator':
+            search_config['stlsq_threshold'] = 1.0
+            search_config['t_ude_steps'] = [0.2, 0.1]
             search_config['basis_libs'] = {
-                'hill': [
-                    lambda x: 1.0 / (1.0 + x),
-                    lambda x: 1.0 / (1.0 + x ** 2),
-                    lambda x: 1.0 / (1.0 + x ** 3)
-                ]}
+                'hill_1': [lambda x: 1.0 / (1.0 + x)],
+                'hill_2': [lambda x: 1.0 / (1.0 + x ** 2)],
+                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)]}
             search_config['basis_strs'] = {
-                'hill': [
-                    lambda x: f'1/(1+{x})', lambda x: f'1/(1+{x}^2)',
-                    lambda x: f'1/(1+{x}^3)'
-                ]}
+                'hill_1': [lambda x: f'1/(1+{x})'],
+                'hill_2': [lambda x: f'1/(1+{x}^2)'],
+                'hill_3': [lambda x: f'1/(1+{x}^3)']}
 
             def recovered_dynamics(t, x, model):
                 return model.predict(x[np.newaxis, :])[0] - x
@@ -388,7 +399,7 @@ def main():
     # initialize table for model metrics
     num_variables = train_sample[0].x.shape[1]
     model_metric_columns = ['t_step', 'basis', 'basis_normalized', 'optimizer',
-                            'optimizer_args']
+                            'optimizer_args', 'mse']
     model_metric_columns.extend(
         f'indiv_mse[{i}]' for i in range(num_variables))
     model_metric_columns.append('aicc')
