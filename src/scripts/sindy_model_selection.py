@@ -274,9 +274,6 @@ def main():
     print(f'- Validation sample size: {len(valid_sample)}', flush=True)
     print(f'- Test sample size: {len(valid_sample)}', flush=True)
 
-    if args.model == 'repressilator':
-        test_sample = [ts[:len(ts) // 2] for ts in test_sample]
-
     print_hrule()
 
     # load learned UDE model
