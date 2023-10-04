@@ -982,9 +982,10 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
                 loss /= self._batch_size
 
-            # backpropagate and update parameters
             if show_progress:
-                pbar.set_postfix_str(f'{loss.item():8.6f}')
+                pbar.set_postfix_str(f'loss = {loss.item():8.6f}')
+
+            # backpropagate and update parameters
             if loss.requires_grad:
                 loss.backward()
                 optimizer.step()
