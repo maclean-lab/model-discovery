@@ -214,6 +214,8 @@ def get_args():
                             help='Noise level of training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
+    arg_parser.add_argument('--ude_data_source', type=str, default='raw',
+                            help='Data source for UDE model training')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
@@ -278,16 +280,19 @@ def main():
 
     # load learned UDE model
     print('Loading UDE model with lowest validation loss...', flush=True)
+    ude_data_source = args.ude_data_source
+    print(f'UDE data source: {ude_data_source}', flush=True)
     print('Network architecture:', flush=True)
-    print('- Hidden neurons:', args.num_hidden_neurons, flush=True)
-    print('- Activation function:', args.activation, flush=True)
-    output_dir = os.path.join(
-        project_root, 'outputs',
-        f'{model_prefix}-{int(t_train_span[1])}s-ude-')
+    print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
+    print(f'- Activation function: {args.activation}', flush=True)
+    output_dir = f'{model_prefix}-{int(t_train_span[1])}s-'
+    if ude_data_source != 'raw':
+        output_dir += ude_data_source.replace('_', '-')
+    output_dir += '-ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
-        output_dir,
+        project_root, 'outputs', output_dir,
         f'noise-{noise_level:.3f}-seed-{seed:04d}-ude-model-selection')
 
     if not os.path.exists(output_dir):
@@ -411,7 +416,7 @@ def main():
 
     print('SINDy model selection setup finished', flush=True)
     t_span_str = ', '.join(str(t) for t in search_config['t_sindy_span'])
-    print(f'Time span for SINDy training: {t_span_str}', flush=True)
+    print(f'Time span for SINDy training: ({t_span_str})', flush=True)
     print_hrule()
 
     search_time_steps(search_config, verbose=verbose)
