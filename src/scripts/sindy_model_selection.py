@@ -16,18 +16,20 @@ from model_helpers import get_model_module, get_model_prefix, print_hrule
 
 
 def search_time_steps(search_config, verbose=False):
-    t_train_span = search_config['t_train_span']
     t_sindy_span = search_config['t_sindy_span']
     ts_learner = search_config['ts_learner']
     train_sample = search_config['train_sample']
-    train_sample_size = len(train_sample)
+    ude_train_sample = search_config['ude_train_sample']
+    train_sample_size = len(ude_train_sample)
 
+    # evaluate on UDE training time span
     for t_step in search_config['t_ude_steps']:
         print(f'Generating UDE dynamics on t_step {t_step:.03f} for SINDy '
               'training...', flush=True)
-        t_train = [np.arange(t_train_span[0], t_train_span[1] + 1e-8, t_step)
-                   for _ in range(train_sample_size)]
-        x0_train = [ts.x[0, :] for ts in train_sample]
+        t_train = [np.arange(ts.t[0], ts.t[-1] + t_step * 1e-3, t_step)
+                   for ts in ude_train_sample]
+        x0_train = [ts.x[0, :] for ts in ude_train_sample]
+
         # generate UDE dynamics with slightly different initial conditions
         # if all initial conditions are the same
         if all(np.array_equal(x0_train[0], x0) for x0 in x0_train):
@@ -234,15 +236,23 @@ def get_args():
 
 
 # set up boundary check for integration
-def check_lower_bound(t, x, model):
-    return float(np.all(x > -10.0))
+def get_lower_bound_checker(lower_bound):
+    def check_lower_bound(t, x, model):
+        return float(np.all(x > lower_bound))
+
+    return check_lower_bound
 
 
-def check_upper_bound(t, x, model):
-    return float(np.all(x < 20.0))
+def get_upper_bound_checker(upper_bound):
+    def check_upper_bound(t, x, model):
+        return float(np.all(x < upper_bound))
+
+    return check_upper_bound
 
 
 def main():
+    # TODO: move certain parts to a separate function
+    # E.g. data loading, UDE model loading, basis function setup
     args = get_args()
     verbose = args.verbose
 
@@ -287,8 +297,9 @@ def main():
     print(f'- Activation function: {args.activation}', flush=True)
     output_dir = f'{model_prefix}-{int(t_train_span[1])}s-'
     if ude_data_source != 'raw':
-        output_dir += ude_data_source.replace('_', '-')
-    output_dir += '-ude-'
+        output_dir += ude_data_source.replace('_', '-') + '-ude-'
+    else:
+        output_dir += 'ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
@@ -327,6 +338,19 @@ def main():
     ts_learner = NeuralDynamicsLearner(train_sample, output_dir, output_prefix)
     ts_learner.load_model(
         hybrid_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
+
+    # get training sample used by the UDE model
+    if ude_data_source == 'raw':
+        search_config['ude_train_sample'] = train_sample
+    else:
+        ude_data_path = os.path.join(
+            project_root, 'data',
+            f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}'
+            f'_{ude_data_source}.h5')
+        data_fd = h5py.File(ude_data_path, 'r')
+        search_config['ude_train_sample'] = load_sample_from_h5(data_fd,
+                                                                'train')
+        data_fd.close()
 
     print('UDE model loaded', flush=True)
 
@@ -387,11 +411,19 @@ def main():
             search_config['basis_libs'] = {
                 'hill_1': [lambda x: 1.0 / (1.0 + x)],
                 'hill_2': [lambda x: 1.0 / (1.0 + x ** 2)],
-                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)]}
+                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)],
+                'hill_all': [lambda x: 1.0 / (1.0 + x),
+                             lambda x: 1.0 / (1.0 + x ** 2),
+                             lambda x: 1.0 / (1.0 + x ** 3)]
+            }
             search_config['basis_strs'] = {
-                'hill_1': [lambda x: f'1/(1+{x})'],
-                'hill_2': [lambda x: f'1/(1+{x}^2)'],
-                'hill_3': [lambda x: f'1/(1+{x}^3)']}
+                'hill_1': [lambda x: f'/(1+{x})'],
+                'hill_2': [lambda x: f'/(1+{x}^2)'],
+                'hill_3': [lambda x: f'/(1+{x}^3)'],
+                'hill_all': [lambda x: f'/(1+{x})',
+                             lambda x: f'/(1+{x}^2)',
+                             lambda x: f'/(1+{x}^3)']
+            }
 
             def recovered_dynamics(t, x, model):
                 return model.predict(x[np.newaxis, :])[0] - x
@@ -410,9 +442,10 @@ def main():
     model_metric_columns.append('recovered_eqs')
     search_config['model_metrics'] = pd.DataFrame(columns=model_metric_columns)
 
-    check_lower_bound.terminal = True
-    check_upper_bound.terminal = True
-    search_config['stop_events'] = [check_upper_bound, check_lower_bound]
+    search_config['stop_events'] = [get_lower_bound_checker(-10.0),
+                                    get_upper_bound_checker(20.0)]
+    for event in search_config['stop_events']:
+        event.terminal = True
 
     print('SINDy model selection setup finished', flush=True)
     t_span_str = ', '.join(str(t) for t in search_config['t_sindy_span'])

@@ -1168,7 +1168,6 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
             is_integrator_successful = True
 
-            # TODO: implement with torchode
             if integrator_backend == 'torchdiffeq':
                 x_pred = tdf_odeint(
                     self._model, x[0, :], t, **integrator_kwargs)

@@ -82,12 +82,7 @@ def main():
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
     train_sample = load_sample_from_h5(data_fd, 'train')
-    # TODO: after getting LSTM results on repressilator, determine whether
-    # to use raw or preprocessed data for validation
-    if args.model == 'repressilator' and data_source == 'raw':
-        valid_sample = train_sample
-    else:
-        valid_sample = load_sample_from_h5(data_fd, 'valid')
+    valid_sample = load_sample_from_h5(data_fd, 'valid')
     data_fd.close()
 
     print('Data loaded:', flush=True)
@@ -117,8 +112,9 @@ def main():
     print('Setting up training...', flush=True)
     output_dir = f'{model_prefix}-{int(t_train_span[1])}s-'
     if data_source != 'raw':
-        output_dir += data_source.replace('_', '-')
-    output_dir += '-ude-'
+        output_dir += data_source.replace('_', '-') + '-ude-'
+    else:
+        output_dir += 'ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(project_root, 'outputs', output_dir)
