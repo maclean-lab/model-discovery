@@ -21,6 +21,9 @@ def get_args():
                             choices=['lotka_volterra', 'repressilator'],
                             help='Dynamical model from which data is '
                             'generated')
+    arg_parser.add_argument('--noise_type', type=str, required=True,
+                            choices=['additive', 'multiplicative'],
+                            help='Type of noise added to data')
     arg_parser.add_argument('--noise_level', type=float, required=True,
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
@@ -68,6 +71,7 @@ def main():
     # load data
     model_module = get_model_module(args.model)
     model_prefix = get_model_prefix(args.model)
+    noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
     data_source = args.data_source
@@ -76,8 +80,8 @@ def main():
         os.path.join(os.path.dirname(__file__), '..', '..'))
     data_path = os.path.join(
         project_root, 'data',
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}'
-        f'_{data_source}.h5')
+        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
+        f'_seed_{seed:04d}_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
@@ -89,6 +93,7 @@ def main():
     print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
     print(f'- True parameter value: [{param_str}]', flush=True)
+    print(f'- Noise type: {noise_type}', flush=True)
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
     print(f'- Data source: {data_source}', flush=True)
@@ -110,7 +115,7 @@ def main():
 
     # set up for output files
     print('Setting up training...', flush=True)
-    output_dir = f'{model_prefix}-{int(t_train_span[1])}s-'
+    output_dir = f'{model_prefix}-'
     if data_source != 'raw':
         output_dir += data_source.replace('_', '-') + '-ude-'
     else:
@@ -120,7 +125,8 @@ def main():
     output_dir = os.path.join(project_root, 'outputs', output_dir)
     output_dir = os.path.join(
         output_dir,
-        f'noise-{noise_level:.3f}-seed-{seed:04d}-ude-model-selection')
+        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
+        '-ude-model-selection')
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

@@ -43,6 +43,9 @@ def get_args():
                             choices=['lotka_volterra', 'repressilator'],
                             help='Dynamical model from which data is '
                             'generated')
+    arg_parser.add_argument('--noise_type', type=str, required=True,
+                            choices=['additive', 'multiplicative'],
+                            help='Type of noise added to data')
     arg_parser.add_argument('--noise_level', type=float, required=True,
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
@@ -75,6 +78,7 @@ def main():
 
     # load data
     model_prefix = get_model_prefix(args.model)
+    noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
     print('Loading data...', flush=True)
@@ -82,7 +86,8 @@ def main():
         os.path.join(os.path.dirname(__file__), '..', '..'))
     data_path = os.path.join(
         project_root, 'data',
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}_raw.h5')
+        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
+        f'_seed_{seed:04d}_raw.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     x0_true = data_fd.attrs['x0']
@@ -98,6 +103,7 @@ def main():
     print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
     print(f'- True parameter value: [{param_str}]', flush=True)
+    print(f'- Noise type: {noise_type}', flush=True)
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_spans['train'])
@@ -110,11 +116,12 @@ def main():
     # set up for output files
     print('Setting up training...', flush=True)
     output_dir = os.path.join(
-        project_root, 'outputs',
-        f'{model_prefix}-{int(t_spans["train"][1])}s-lstm')
+        project_root, 'outputs', f'{model_prefix}-lstm')
     output_dir += f'-{args.num_hidden_features}-{args.num_layers}'
     output_dir = os.path.join(
-        output_dir, f'noise-{noise_level:.3f}-seed-{seed:04d}-model-selection')
+        output_dir,
+        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
+        '-model-selection')
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -222,13 +229,14 @@ def main():
                           input_mask=input_mask)
     ts_learner.eval(eval_data=samples['train'], method='rolling',
                     show_progress=False)
-    output_data_path = f'{model_prefix}_noise_{noise_level:.03f}'
+    output_data_path = f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
     output_data_path += f'_seed_{seed:04d}'
     output_data_path += f'_lstm_{args.num_hidden_features}_{args.num_layers}'
     output_data_path += '.h5'
     output_data_path = os.path.join(project_root, 'data', output_data_path)
     with h5py.File(output_data_path, 'w') as fd:
         # save model parameters
+        fd.attrs['noise_type'] = noise_type
         fd.attrs['noise_level'] = noise_level
         fd.attrs['param_values'] = params_true
         fd.attrs['x0'] = x0_true

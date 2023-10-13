@@ -212,6 +212,9 @@ def get_args():
                             choices=['lotka_volterra', 'repressilator'],
                             help='Dynamical model from which data is '
                             'generated')
+    arg_parser.add_argument('--noise_type', type=str, required=True,
+                            choices=['additive', 'multiplicative'],
+                            help='Type of noise added to data')
     arg_parser.add_argument('--noise_level', type=float, required=True,
                             help='Noise level of training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
@@ -258,6 +261,7 @@ def main():
 
     # initialize model and data
     search_config = {}
+    noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
     print('Loading data...', flush=True)
@@ -266,7 +270,8 @@ def main():
     model_prefix = get_model_prefix(args.model)
     data_path = os.path.join(
         project_root, 'data',
-        f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}_raw.h5')
+        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
+        f'_seed_{seed:04d}_raw.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
@@ -278,6 +283,7 @@ def main():
     print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
     print(f'- True parameter value: [{param_str}]', flush=True)
+    print(f'- Noise type: {noise_type}', flush=True)
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
@@ -295,7 +301,7 @@ def main():
     print('Network architecture:', flush=True)
     print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
     print(f'- Activation function: {args.activation}', flush=True)
-    output_dir = f'{model_prefix}-{int(t_train_span[1])}s-'
+    output_dir = f'{model_prefix}-'
     if ude_data_source != 'raw':
         output_dir += ude_data_source.replace('_', '-') + '-ude-'
     else:
@@ -304,7 +310,8 @@ def main():
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
         project_root, 'outputs', output_dir,
-        f'noise-{noise_level:.3f}-seed-{seed:04d}-ude-model-selection')
+        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
+        f'-ude-model-selection')
 
     if not os.path.exists(output_dir):
         print('No UDE model found for the given architecture', flush=True)
@@ -345,8 +352,8 @@ def main():
     else:
         ude_data_path = os.path.join(
             project_root, 'data',
-            f'{model_prefix}_noise_{noise_level:.03f}_seed_{seed:04d}'
-            f'_{ude_data_source}.h5')
+            f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
+            f'_seed_{seed:04d}_{ude_data_source}.h5')
         data_fd = h5py.File(ude_data_path, 'r')
         search_config['ude_train_sample'] = load_sample_from_h5(data_fd,
                                                                 'train')
@@ -357,12 +364,14 @@ def main():
     # set up for SINDy model selection
     output_dir = os.path.join(
         os.path.split(output_dir)[0],
-        f'noise-{noise_level:.3f}-seed-{seed:04d}-sindy-model-selection')
+        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
+        '-sindy-model-selection')
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     ts_learner.output_dir = output_dir
+    search_config['noise_type'] = noise_type
     search_config['noise_level'] = noise_level
     search_config['output_dir'] = output_dir
     search_config['t_train_span'] = t_train_span

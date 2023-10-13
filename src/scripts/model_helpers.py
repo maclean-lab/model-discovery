@@ -12,6 +12,16 @@ def get_model_module(model_name):
             raise ValueError(f'Unknown model name: {model_name}')
 
 
+def get_model_class(model_name):
+    match model_name:
+        case 'lotka_volterra':
+            return lotka_volterra_model.LotkaVolterraModel
+        case 'repressilator':
+            return repressilator_model.RepressilatorModel
+        case _:
+            raise ValueError(f'Unknown model name: {model_name}')
+
+
 def get_model_prefix(model_name):
     match model_name:
         case 'lotka_volterra':

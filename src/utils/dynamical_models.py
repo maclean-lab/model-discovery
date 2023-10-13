@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Optional
+from typing import Callable, Optional, Literal
 import numpy as np
 from scipy.integrate import solve_ivp
 
@@ -247,7 +247,10 @@ class DynamicalModel(metaclass=ABCMeta):
 
         return TimeSeries(solution.t, solution.y.T)
 
-    def get_sample(self, sample_size: int, noise_level: float = 0.0,
+    def get_sample(self, sample_size: int,
+                   noise_type:
+                   Literal['additive', 'multiplicative'] = 'additive',
+                   noise_level: float = 0.0,
                    bounds: list[tuple[float, float]] | None = None,
                    rng: Optional[np.random.Generator] = None,
                    ) -> list[TimeSeries]:
@@ -292,21 +295,26 @@ class DynamicalModel(metaclass=ABCMeta):
         t_span = (self._t[0], self._t[-1])
         x = self.simulate(t_span, self._x0, t_eval=self._t).x
 
-        # TODO: add support of other types of random noise
-        ts_sample = []
-        noise_scale = noise_level * np.mean(x, axis=0)
-
+        # initialize random number generator
         if rng is None:
             rng = np.random.default_rng()
 
         # generate sample
+        ts_sample = []
+
+        match noise_type:
+            case 'additive':
+                # noise_scale.shape = (num_vars, )
+                noise_scale = noise_level * np.mean(x, axis=0)
+            case 'multiplicative':
+                # noise_scale.shape = x.shape = (t.size, num_vars)
+                noise_scale = noise_level * x
+
         for _ in range(sample_size):
             if noise_level > 0:
                 # generate a noisy observation
-                x_noise = rng.normal(
-                    size=(self._t.size - 1, x.shape[1])) * noise_scale
-                x_obs = x.copy()
-                x_obs[1:, :] += x_noise
+                x_noise = rng.normal(size=x.shape) * noise_scale
+                x_obs = x + x_noise
             else:
                 # use the clean data as observation
                 x_obs = x
