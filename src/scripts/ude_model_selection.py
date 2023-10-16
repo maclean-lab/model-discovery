@@ -166,6 +166,7 @@ def main():
         print(f'- Window size: {ws}', flush=True)
         print(f'- Batch size: {bs}', flush=True)
         print(f'- Number of epochs: {num_epochs}', flush=True)
+        torch.manual_seed(seed)
 
         # train the model
         match args.model:
@@ -182,8 +183,7 @@ def main():
         ts_learner = NeuralDynamicsLearner(train_sample, output_dir,
                                            output_prefix)
         ts_learner.train(hybrid_dynamics, loss_func, optimizer, lr, ws, bs,
-                         num_epochs, seed=seed,
-                         integrator_backend=integrator_backend,
+                         num_epochs, integrator_backend=integrator_backend,
                          torchode_step_method=args.torchode_step_method,
                          valid_data=valid_sample,
                          valid_kwargs={'integrator_backend': 'scipy',

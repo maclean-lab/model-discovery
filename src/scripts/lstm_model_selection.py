@@ -158,6 +158,7 @@ def main():
         print(f'- Window size: {ws}', flush=True)
         print(f'- Batch size: {bs}', flush=True)
         print(f'- Number of epochs: {num_epochs}', flush=True)
+        torch.manual_seed(seed)
 
         lstm_dynamics = LstmDynamics(num_vars, ws, args.num_hidden_features,
                                      args.num_layers)
@@ -167,7 +168,7 @@ def main():
         input_mask = torch.full((ws, ), True, dtype=torch.bool)
         input_mask[ws // 2] = False
         ts_learner.train(lstm_dynamics, loss_func, optimizer, lr, ws, bs,
-                         num_epochs, input_mask, seed=seed,
+                         num_epochs, input_mask,
                          valid_data=samples['valid'],
                          valid_kwargs={'method': 'rolling'},
                          save_epoch_model=True,

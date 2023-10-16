@@ -359,7 +359,7 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
               optimizer_type: type[torch.optim.Optimizer],
               learning_rate: float, window_size: int, batch_size: int,
               num_epochs: int, input_mask: np.ndarray | Tensor, *args,
-              seed: int | None = None, optimizer_kwargs: dict | None = None,
+              optimizer_kwargs: dict | None = None,
               training_params: Iterable | None = None,
               valid_data: list[TimeSeries] | None = None,
               valid_kwargs: dict | None = None, save_epoch_model: bool = False,
@@ -397,7 +397,6 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
                 mask is [True, True, False], the model will predict the value
                 at the last time point from the values at the first two.
             *args: additional positional arguments. Not used here.
-            seed (int | None): random seed for PyTorch. Default is None.
             optimizer_kwargs (dict | None): additional keyword arguments for
                 the optimizer. Default is None.
             training_params (Iterable | None): model parameters to be trained.
@@ -437,8 +436,6 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
         self._num_epochs = num_epochs
         self._input_mask = torch.as_tensor(input_mask, dtype=torch.bool)
 
-        if seed is not None:
-            torch.manual_seed(seed)
         if training_params is None:
             training_params = self._model.parameters()
         optimizer = optimizer_type(training_params, lr=learning_rate,
@@ -867,8 +864,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
     def train(self, model: nn.Module, loss_func: Callable,
               optimizer_type: type[torch.optim.Optimizer],
               learning_rate: float, window_size: int, batch_size: int,
-              num_epochs: int, *args, seed: int | None = None,
-              optimizer_kwargs: dict | None = None,
+              num_epochs: int, *args, optimizer_kwargs: dict | None = None,
               training_params: Iterable | None = None,
               integrator_backend:
               Literal['torchdiffeq', 'torchode'] = 'torchdiffeq',
@@ -902,7 +898,6 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             batch_size (int): batch size for training.
             num_epochs (int): number of training epochs.
             *args: additional positional arguments. Not used here.
-            seed (int | None): random seed for PyTorch. Default is None.
             optimizer_kwargs (dict | None): additional keyword arguments for
                 the optimizer. Default is None.
             training_params (Iterable | None): model parameters to be trained.
@@ -941,7 +936,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
         super().train(model, loss_func, optimizer_type, learning_rate,
                       window_size, batch_size, num_epochs, dummy_input_mask,
-                      *args, seed=seed, optimizer_kwargs=optimizer_kwargs,
+                      *args, optimizer_kwargs=optimizer_kwargs,
                       training_params=training_params, valid_data=valid_data,
                       valid_kwargs=valid_kwargs,
                       save_epoch_model=save_epoch_model,
