@@ -1478,7 +1478,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         Returns:
             dict[str, Any]: AICc for each variable and the overall AICc.
         """
-        k = self._model.coefficients().size  # number of free params to fit
+        k = np.count_nonzero(self._model.coefficients())  # number of params
         rss = np.zeros(self._num_vars)  # residual sum of squares
         m = 0  # number of prediction samples actually used for computing AICc
         metrics = {}
@@ -1503,7 +1503,10 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         if m > 0:
             indiv_aic = m * np.log(rss / m) + 2 * k
             aic = m * np.log(np.mean(rss) / m) + 2 * k
-            correction = 2 * (k + 1) * (k + 2) / (m - k - 2)
+            if k == 0:
+                correction = 0
+            else:
+                correction = 2 * (k + 1) * (k + 2) / (m - k - 2)
             metrics['indiv_aicc'] = indiv_aic + correction
             metrics['aicc'] = np.mean(aic) + correction
         else:
