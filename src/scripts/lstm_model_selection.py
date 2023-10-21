@@ -140,6 +140,7 @@ def main():
     print('Training setup finished', flush=True)
     print('Network architecture:', flush=True)
     print('- Hidden features:', args.num_hidden_features, flush=True)
+    print('- Number of hidden layers:', args.num_layers, flush=True)
     print('Hyperparameters to search over:', flush=True)
     print('- Learning rates:', learning_rates, flush=True)
     print('- Window sizes:', window_sizes, flush=True)
