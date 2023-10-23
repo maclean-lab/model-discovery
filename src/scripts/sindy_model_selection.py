@@ -421,17 +421,27 @@ def main():
                 'hill_1': [lambda x: 1.0 / (1.0 + x)],
                 'hill_2': [lambda x: 1.0 / (1.0 + x ** 2)],
                 'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)],
-                'hill_all': [lambda x: 1.0 / (1.0 + x),
-                             lambda x: 1.0 / (1.0 + x ** 2),
-                             lambda x: 1.0 / (1.0 + x ** 3)]
+                'hill_4': [lambda x: 1.0 / (1.0 + x ** 4)],
+                'hill_max_3': [lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3)],
+                'hill_max_4': [lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3),
+                               lambda x: 1.0 / (1.0 + x ** 4)]
             }
             search_config['basis_strs'] = {
                 'hill_1': [lambda x: f'/(1+{x})'],
                 'hill_2': [lambda x: f'/(1+{x}^2)'],
                 'hill_3': [lambda x: f'/(1+{x}^3)'],
-                'hill_all': [lambda x: f'/(1+{x})',
-                             lambda x: f'/(1+{x}^2)',
-                             lambda x: f'/(1+{x}^3)']
+                'hill_4': [lambda x: f'/(1+{x}^4)'],
+                'hill_max_3': [lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)'],
+                'hill_max_4': [lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)',
+                               lambda x: f'/(1+{x}^4)']
             }
 
             def recovered_dynamics(t, x, model):
