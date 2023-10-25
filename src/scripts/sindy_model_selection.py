@@ -302,8 +302,9 @@ def main():
     print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
     print(f'- Activation function: {args.activation}', flush=True)
     output_dir = f'{model_prefix}-'
-    if ude_data_source not in ('raw', 'raw_clean_x0'):
-        output_dir += ude_data_source.replace('_', '-') + '-ude-'
+    if ude_data_source != 'raw':
+        output_dir += ude_data_source.replace('_', '-')
+        output_dir += '-ude-'
     else:
         output_dir += 'ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
@@ -347,7 +348,7 @@ def main():
         hybrid_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
 
     # get training sample used by the UDE model
-    if ude_data_source == 'raw':
+    if ude_data_source in ('raw', 'clean_x0'):
         search_config['ude_train_sample'] = train_sample
     else:
         ude_data_path = os.path.join(

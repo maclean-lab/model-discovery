@@ -116,8 +116,9 @@ def main():
     # set up for output files
     print('Setting up training...', flush=True)
     output_dir = f'{model_prefix}-'
-    if data_source not in ('raw', 'raw_clean_x0'):
-        output_dir += data_source.replace('_', '-') + '-ude-'
+    if data_source != 'raw':
+        output_dir += data_source.replace('_', '-')
+        output_dir += '-ude-'
     else:
         output_dir += 'ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)

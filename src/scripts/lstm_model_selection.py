@@ -50,6 +50,9 @@ def get_args():
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
+    arg_parser.add_argument('--data_source', type=str, default='raw',
+                            help='Data source to use for training, raw or'
+                            'clean_x0')
     arg_parser.add_argument('--num_hidden_features', type=int, default=8,
                             help='Number of features in each hidden LSTM '
                             'layer')
@@ -81,13 +84,14 @@ def main():
     noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
+    data_source = args.data_source
     print('Loading data...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
     data_path = os.path.join(
         project_root, 'data',
         f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_raw.h5')
+        f'_seed_{seed:04d}_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     x0_true = data_fd.attrs['x0']
@@ -232,11 +236,15 @@ def main():
                           input_mask=input_mask)
     ts_learner.eval(eval_data=samples['train'], method='rolling',
                     show_progress=False)
+
+    # construct path for LSTM smoothed data
+    # see README.md in the data directory for naming specifications
     output_data_path = f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-    output_data_path += f'_seed_{seed:04d}'
+    output_data_path += f'_seed_{seed:04d}_{data_source}'
     output_data_path += f'_lstm_{args.num_hidden_features}_{args.num_layers}'
     output_data_path += '.h5'
     output_data_path = os.path.join(project_root, 'data', output_data_path)
+
     with h5py.File(output_data_path, 'w') as fd:
         # save model parameters
         fd.attrs['noise_type'] = noise_type

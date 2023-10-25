@@ -116,10 +116,12 @@ def main():
     output_dir = os.path.join(project_root, 'data')
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    # construct path for output data
     output_path = f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
     output_path += f'_seed_{seed:04d}'
     if args.clean_x0:
-        output_path += '_raw_clean_x0.h5'
+        output_path += '_clean_x0.h5'
     else:
         output_path += '_raw.h5'
     output_path = os.path.join(output_dir, output_path)
