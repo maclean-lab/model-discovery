@@ -98,6 +98,7 @@ def main():
         t_spans[dataset_type] = data_fd[dataset_type].attrs['t_span']
         t_steps[dataset_type] = data_fd[dataset_type].attrs['t_step']
         samples[dataset_type] = load_sample_from_h5(data_fd, dataset_type)
+    data_fd.close()
     num_vars = samples['train'][0].num_vars
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)

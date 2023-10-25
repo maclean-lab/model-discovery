@@ -11,6 +11,7 @@ from dynamical_models import DynamicalModel
 
 class RepressilatorModel(DynamicalModel):
     _NUM_VARIABLES = 3
+    _VARIABLE_NAMES = ['Gene 1', 'Gene 2', 'Gene 3']
     _PARAM_NAMES = ['beta', 'n']
     _DEFAULT_PARAM_VALUES = np.array([10.0, 3])
     _DEFAULT_X0 = np.array([1.0, 1.0, 1.2])

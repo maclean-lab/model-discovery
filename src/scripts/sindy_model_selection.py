@@ -302,7 +302,7 @@ def main():
     print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
     print(f'- Activation function: {args.activation}', flush=True)
     output_dir = f'{model_prefix}-'
-    if ude_data_source != 'raw':
+    if ude_data_source not in ('raw', 'raw_clean_x0'):
         output_dir += ude_data_source.replace('_', '-') + '-ude-'
     else:
         output_dir += 'ude-'

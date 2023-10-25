@@ -34,7 +34,7 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
         The training data is immutable after initialization. A subclass should
         implement the `train()` method to learn a model (e.g. a neural network)
         from the training data, and the `eval()` method to evaluate the learned
-        model on some data.  Each time the `train()` method is called, it may
+        model on some data. Each time the `train()` method is called, it may
         store a new model as class attribute `model`, potentially overwriting
         an existing one. Similarly, each time the 'eval()' method is called, it
         may store new evaluation data and prediction data as class attributes
@@ -630,11 +630,11 @@ class NeuralTimeSeriesLearner(BaseTimeSeriesLearner):
                 evaluate. If set to `None`, the training data will be used.
                 Default is `None`.
             t_eval (np.ndarray | list[np.ndarray] | None): time points of
-                evaluation data. Only used if method is `autoregressive`.  If
+                evaluation data. Only used if method is `autoregressive`. If
                 given, `x0_eval` must also be given. Default is `None`.
             x0_eval (np.ndarray | list[np.ndarray] | None): initial conditions
                 of evaluation data. Only used if method is `autoregressive`. If
-                given, `t_eval` must also be given.  Default is `None`.
+                given, `t_eval` must also be given. Default is `None`.
             ref_data (list[TimeSeries] | None): list of reference time series
                 to be used for evaluating performance metrics. Default is
                 `None`.
@@ -1001,7 +1001,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
         Args:
             model (nn.Module): PyTorch module to be integrated.
             torchode_step_method (Literal['Dopri5', 'Tsit5']): type of ODE
-                integration method from `torchode`.  Default is `Dopri5`.
+                integration method from `torchode`. Default is `Dopri5`.
         """
         ode_term = torchode.ODETerm(model)
         ode_step_method = getattr(torchode, step_method)(term=ode_term)
@@ -1038,11 +1038,11 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                 evaluate. If set to `None`, the training data will be used.
                 Default is `None`.
             t_eval (np.ndarray | list[np.ndarray] | None): time points of
-                evaluation data. Only used if method is `autoregressive`.  If
+                evaluation data. Only used if method is `autoregressive`. If
                 given, `x0_eval` must also be given. Default is `None`.
             x0_eval (np.ndarray | list[np.ndarray] | None): initial conditions
                 of evaluation data. Only used if method is `autoregressive`. If
-                given, `t_eval` must also be given.  Default is `None`.
+                given, `t_eval` must also be given. Default is `None`.
             ref_data (list[TimeSeries] | None): list of reference time series
                 to be used for evaluating performance metrics. Default is
                 `None`.
@@ -1355,11 +1355,11 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 evaluate. If set to `None`, the training data will be used.
                 Default is `None`.
             t_eval (np.ndarray | list[np.ndarray] | None): time points of
-                evaluation data. Only used if method is `autoregressive`.  If
+                evaluation data. Only used if method is `autoregressive`. If
                 given, `x0_eval` must also be given. Default is `None`.
             x0_eval (np.ndarray | list[np.ndarray] | None): initial conditions
                 of evaluation data. Only used if method is `autoregressive`. If
-                given, `t_eval` must also be given.  Default is `None`.
+                given, `t_eval` must also be given. Default is `None`.
             ref_data (list[TimeSeries] | None): list of reference time series
                 to be used for evaluating performance metrics. Default is
                 `None`.

@@ -18,6 +18,7 @@ def get_args():
                             choices=['lotka_volterra', 'repressilator'],
                             help='Dynamical model to generate data from')
     args, _ = arg_parser.parse_known_args()
+    model_class = get_model_class(args.model)
 
     # get all other arguments
     # noise level and random seed
@@ -28,9 +29,10 @@ def get_args():
                             help='Noise level of generated data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed for generating data')
+    arg_parser.add_argument('--clean_x0', action='store_true',
+                            help='Whether to use clean initial conditions')
 
     # model parameter related arguments
-    model_class = get_model_class(args.model)
     default_param_values = model_class.get_default_param_values().tolist()
     param_meta_names = tuple(
         pn.upper() for pn in model_class.get_param_names())
@@ -114,10 +116,13 @@ def main():
     output_dir = os.path.join(project_root, 'data')
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    output_path = os.path.join(
-        output_dir,
-        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_raw.h5')
+    output_path = f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
+    output_path += f'_seed_{seed:04d}'
+    if args.clean_x0:
+        output_path += '_raw_clean_x0.h5'
+    else:
+        output_path += '_raw.h5'
+    output_path = os.path.join(output_dir, output_path)
 
     with h5py.File(output_path, 'w') as fd:
         # save model parameters
@@ -126,6 +131,7 @@ def main():
         fd.attrs['rng_seed'] = seed
         fd.attrs['param_values'] = param_values
         fd.attrs['x0'] = x0
+        fd.attrs['clean_x0'] = int(args.clean_x0)
 
         for dataset_type in ['train', 'valid', 'test']:
             # create group for dataset
@@ -143,7 +149,7 @@ def main():
             # save samples
             samples = model.get_sample(
                 sample_size, noise_type=noise_type, noise_level=noise_level,
-                bounds=data_bounds, rng=rng)
+                clean_x0=args.clean_x0, bounds=data_bounds, rng=rng)
 
             for idx, sample in enumerate(samples):
                 sample_group = data_group.create_group(f'sample_{idx:04d}')

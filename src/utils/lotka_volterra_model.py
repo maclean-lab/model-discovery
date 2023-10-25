@@ -9,6 +9,7 @@ from dynamical_models import DynamicalModel
 
 class LotkaVolterraModel(DynamicalModel):
     _NUM_VARIABLES = 2
+    _VARIABLE_NAMES = ['Prey', 'Predator']
     _PARAM_NAMES = ['alpha', 'beta', 'gamma', 'delta']
     _DEFAULT_PARAM_VALUES = np.array([1.3, 0.9, 0.8, 1.8])
     _DEFAULT_X0 = np.array([0.44249296, 4.6280594])

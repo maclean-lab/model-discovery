@@ -10,6 +10,7 @@ from time_series_data import TimeSeries
 
 class DynamicalModel(metaclass=ABCMeta):
     _NUM_VARIABLES = 0
+    _VARIABLE_NAMES = []
     _PARAM_NAMES = []
     _DEFAULT_PARAM_VALUES = np.empty(0)
     _DEFAULT_X0 = np.empty(0)
@@ -25,9 +26,11 @@ class DynamicalModel(metaclass=ABCMeta):
         To implement an actual class of dynamical models, the following
         constants should be defined:
             - _NUM_VARIABLES: number of variables in the model
+            - _VARIABLE_NAMES: names of the variables
             - _PARAM_NAMES: names of the parameters
             - _DEFAULT_PARAM_VALUES: default values of the parameters
             - _DEFAULT_X0: default initial conditions
+            - _DEFAULT_T_STEP: default step size of time points
             - _DEFAULT_T: default time points
         In addition, the following method should be implemented:
             - equations: right-hand side of the ODE system, which has the form
@@ -135,6 +138,10 @@ class DynamicalModel(metaclass=ABCMeta):
         return self._NUM_VARIABLES
 
     @property
+    def variable_names(self) -> list[str]:
+        return self._VARIABLE_NAMES.copy()
+
+    @property
     def param_names(self) -> list[str]:
         return self._PARAM_NAMES.copy()
 
@@ -197,6 +204,10 @@ class DynamicalModel(metaclass=ABCMeta):
         return cls._NUM_VARIABLES
 
     @classmethod
+    def get_variable_names(cls) -> list[str]:
+        return cls._VARIABLE_NAMES.copy()
+
+    @classmethod
     def get_param_names(cls) -> list[str]:
         return cls._PARAM_NAMES.copy()
 
@@ -250,7 +261,7 @@ class DynamicalModel(metaclass=ABCMeta):
     def get_sample(self, sample_size: int,
                    noise_type:
                    Literal['additive', 'multiplicative'] = 'additive',
-                   noise_level: float = 0.0,
+                   noise_level: float = 0.0, clean_x0: bool = False,
                    bounds: list[tuple[float, float]] | None = None,
                    rng: Optional[np.random.Generator] = None,
                    ) -> list[TimeSeries]:
@@ -260,7 +271,11 @@ class DynamicalModel(metaclass=ABCMeta):
 
         Args:
             sample_size (int): the number of time series in the sample.
+            noise_type (Literal['additive', 'multiplicative'], optional): the
+                type of noise to add to the data. Defaults to 'additive'.
             noise_level (float, optional): the level of noise. Defaults to 0.0.
+            clean_x0 (bool, optional): whether to use noise-free values for
+                initial conditions. Defaults to False.
             bounds (list[tuple[float, float]] | None, optional): lower and
                 upper bounds of generated values for each variable. Defaults to
                 None, in which case no bounds are imposed.
@@ -315,6 +330,10 @@ class DynamicalModel(metaclass=ABCMeta):
                 # generate a noisy observation
                 x_noise = rng.normal(size=x.shape) * noise_scale
                 x_obs = x + x_noise
+
+                if clean_x0:
+                    # recover x0
+                    x_obs[0, :] = x[0, :]
             else:
                 # use the clean data as observation
                 x_obs = x

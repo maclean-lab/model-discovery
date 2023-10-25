@@ -116,7 +116,7 @@ def main():
     # set up for output files
     print('Setting up training...', flush=True)
     output_dir = f'{model_prefix}-'
-    if data_source != 'raw':
+    if data_source not in ('raw', 'raw_clean_x0'):
         output_dir += data_source.replace('_', '-') + '-ude-'
     else:
         output_dir += 'ude-'
