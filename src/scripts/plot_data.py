@@ -3,8 +3,11 @@ import os.path
 from argparse import ArgumentParser
 
 import numpy as np
+import pandas as pd
 import h5py
+import matplotlib
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from time_series_data import load_sample_from_h5
 from model_helpers import get_model_class, get_model_prefix
@@ -58,10 +61,15 @@ def get_args():
                                 help='Noise level of generated data')
         arg_parser.add_argument('--seed', type=int, default=2023,
                                 help='Random seed for generating data')
+        arg_parser.add_argument('--dataset', type=str, default='train',
+                                choices=['train', 'valid', 'test'],
+                                help='Dataset to generate data from')
 
     # figure related arguments
+    arg_parser.add_argument('--backend', type=str, default='Agg',
+                            help='Matplotlib backend to use')
     arg_parser.add_argument('--figure_size', type=float, nargs=2,
-                            default=(4, 3), metavar=('WIDTH', 'HEIGHT'),
+                            default=(6, 4), metavar=('WIDTH', 'HEIGHT'),
                             help='Figure size in inches')
     arg_parser.add_argument('--figure_dpi', type=int, default=300,
                             help='Figure resolution in dots per inch')
@@ -90,7 +98,7 @@ def plot_true_data(args):
     plt.plot(t, x, label=model.get_variable_names())
     plt.xlabel('Time')
     plt.legend()
-    plt.savefig(figure_path, bbox_inches='tight')
+    plt.savefig(figure_path)
     plt.close('all')
 
 
@@ -108,24 +116,37 @@ def plot_noisy_data(args):
         f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
         f'_seed_{seed:04d}_raw.h5')
     data_fd = h5py.File(data_path, 'r')
-    train_sample = load_sample_from_h5(data_fd, 'train')
+    sample = load_sample_from_h5(data_fd, args.dataset)
     data_fd.close()
     output_dir = os.path.join(project_root, 'outputs', f'{model_prefix}-data')
+
+    # convert data to long form
+    model_class = get_model_class(args.model)
+    var_names = model_class.get_variable_names()
+    long_data = pd.DataFrame(
+        columns=['SampleIndex', 'Time', 'Variable', 'Value'])
+    for i, s in enumerate(sample):
+        for j, t in enumerate(s.t):
+            for k, vn in enumerate(var_names):
+                long_data.loc[len(long_data), :] = [i, t, vn, s.x[j, k]]
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    figure_path = os.path.join(
-        output_dir,
-        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}.pdf')
+    figure_path = f'{noise_type}_noise_{noise_level:.03f}'
+    figure_path += f'_{args.dataset}_data.pdf'
+    figure_path = os.path.join(output_dir, figure_path)
 
     plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
-    for i, sample in enumerate(train_sample):
-        plt.plot(sample.t, sample.x)
-    plt.savefig(figure_path, bbox_inches='tight')
+    g = sns.lineplot(data=long_data, x='Time', y='Value', hue='Variable',
+                     errorbar=('sd', 3))
+    g.legend().set_title(None)
+    plt.savefig(figure_path)
     plt.close('all')
 
 
 def main():
     args = get_args()
+    matplotlib.use(args.backend)
 
     if args.noise_type == 'none':
         plot_true_data(args)

@@ -6,6 +6,7 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 from scipy.integrate import solve_ivp
+from diffeqpy import de
 import torch
 from torch import nn, Tensor
 from torch.utils.data import DataLoader as TorchDataLoader
@@ -1163,29 +1164,30 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
             is_integrator_successful = True
 
-            if integrator_backend == 'torchdiffeq':
-                x_pred = tdf_odeint(
-                    self._model, x[0, :], t, **integrator_kwargs)
-                pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
-            elif integrator_backend == 'torchode':
-                ivp_problem = torchode.InitialValueProblem(
-                    y0=x[None, 0, :], t_eval=t[None, :])
-                ivp_solution = self._ode_integrator.solve(
-                    ivp_problem, **integrator_kwargs)
-                x_pred = ivp_solution.ys[0, ...]
-                pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
-            else:  # integrator_backend == 'scipy'
-                ivp_solution = solve_ivp(
-                    _scipy_ode_func, (t_np[0], t_np[-1]), x_np[0, :],
-                    t_eval=t_np, **integrator_kwargs)
+            match integrator_backend:
+                case 'torchdiffeq':
+                    x_pred = tdf_odeint(
+                        self._model, x[0, :], t, **integrator_kwargs)
+                    pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
+                case 'torchode':
+                    ivp_problem = torchode.InitialValueProblem(
+                        y0=x[None, 0, :], t_eval=t[None, :])
+                    ivp_solution = self._ode_integrator.solve(
+                        ivp_problem, **integrator_kwargs)
+                    x_pred = ivp_solution.ys[0, ...]
+                    pred_data.append(TimeSeries(t.numpy(), x_pred.numpy()))
+                case 'scipy':
+                    ivp_solution = solve_ivp(
+                        _scipy_ode_func, (t_np[0], t_np[-1]), x_np[0, :],
+                        t_eval=t_np, **integrator_kwargs)
 
-                is_integrator_successful = ivp_solution.success
-                if is_integrator_successful:
-                    x_pred = ivp_solution.y.T
-                    pred_data.append(TimeSeries(t_np, x_pred))
-                    x_pred = torch.tensor(x_pred, dtype=self._torch_dtype)
-                else:
-                    pred_data.append(None)
+                    is_integrator_successful = ivp_solution.success
+                    if is_integrator_successful:
+                        x_pred = ivp_solution.y.T
+                        pred_data.append(TimeSeries(t_np, x_pred))
+                        x_pred = torch.tensor(x_pred, dtype=self._torch_dtype)
+                    else:
+                        pred_data.append(None)
 
             # compute results for sub-modules
             if is_integrator_successful and sub_modules is not None:
@@ -1338,6 +1340,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
              x0_eval: np.ndarray | list[np.ndarray] | None = None,
              ref_data: list[TimeSeries] | None = None,
              eval_func: Callable | None = None,
+             integrator_backend: Literal['scipy', 'diffeqpy'] = 'scipy',
              integrator_kwargs: dict | None = None, verbose: bool = False,
              **kwargs) -> None:
         """Evaluate the learned ODEs on data.
@@ -1368,6 +1371,8 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 part of. Must be of the form `def eval_func(t, x, model)` where
                 `model` is the learned model. If set to `None`, the learned
                 system will be used. Default is `None`.
+            integrator_backend (Literal['scipy', 'diffeqpy']): backend of ODE
+                integrator. Default is `scipy`.
             integrator_kwargs (dict | None): additional keyword arguments for
                 the integrator. Default is `None`.
             verbose (bool): whether to print additional information. Default is
@@ -1399,7 +1404,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         num_successes = 0
 
         self._eval(self._eval_data, self._pred_data, eval_func,
-                   integrator_kwargs)
+                   integrator_backend, integrator_kwargs)
 
         self._is_evaluated = True
         self._eval_metrics.update(self._get_mse(self._pred_data, ref_data))
@@ -1420,6 +1425,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
 
     def _eval(self, eval_data: list[TimeSeries], pred_data: list[TimeSeries],
               eval_func: Callable | None = None,
+              integrator_backend: Literal['scipy', 'diffeqpy'] = 'scipy',
               integrator_kwargs: dict | None = None) -> None:
         """Core method for evaluating the learned ODEs.
 
@@ -1430,15 +1436,30 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 the form `def eval_func(t, x, model)` where `model` is the
                 learned model. If set to `None`, the learned system will be
                 used. Default is `None`.
+            integrator_backend (Literal['scipy', 'diffeqpy']): backend of ODE
+                integrator. Default is `scipy`.
             integrator_kwargs (dict | None): additional keyword arguments for
                 the integrator. Default is `None`.
         """
+        # TODO: for diffeqpy, allow passing p to ODEProblem
         # set up evaluation function
         if eval_func is None:
-            def default_eval_func(t, x):
-                return self._model.predict(x[np.newaxis, :])[0]
+            match integrator_backend:
+                case 'scipy':
+                    def default_eval_func(t, x):
+                        return self._model.predict(x[np.newaxis, :])[0]
+                case 'diffeqpy':
+                    def default_eval_func(dx, x, p, t):
+                        dx_pred = self._model.predict(x[np.newaxis, :])[0]
+                        for i in range(self._num_vars):
+                            dx[i] = dx_pred[i]
 
             eval_func = default_eval_func
+        elif integrator_backend == 'diffeqpy':
+            def diffeqpy_eval_func(dx, x, p, t):
+                dx_pred = eval_func(t, x.to_numpy(), self._model)
+                for i in range(self._num_vars):
+                    dx[i] = dx_pred[i]
 
         # convert 'model' in args (used by solve_ivp()) to the actual learned
         # model. this is useful when the learned model is needed for validation
@@ -1454,15 +1475,31 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 pass
 
         for ts in eval_data:
-            ivp_solution = solve_ivp(eval_func, (ts.t[0], ts.t[-1]),
-                                     ts.x[0, :], t_eval=ts.t,
-                                     **integrator_kwargs)
-
-            if isinstance(ivp_solution.t, np.ndarray):
-                ts_pred = TimeSeries(ivp_solution.t, ivp_solution.y.T)
-                pred_data.append(ts_pred)
-            else:
-                pred_data.append(None)
+            t_span = (ts.t[0], ts.t[-1])
+            x0 = ts.x[0, :]
+            match integrator_backend:
+                case 'scipy':
+                    ivp_solution = solve_ivp(eval_func, t_span, x0,
+                                             t_eval=ts.t, **integrator_kwargs)
+                    if isinstance(ivp_solution.t, np.ndarray):
+                        ts_pred = TimeSeries(ivp_solution.t, ivp_solution.y.T)
+                        pred_data.append(ts_pred)
+                    else:
+                        pred_data.append(None)
+                case 'diffeqpy':
+                    ode_problem = de.ODEProblem(diffeqpy_eval_func, x0, t_span,
+                                                self._model)
+                    ode_solution = de.solve(
+                        ode_problem, de.AutoTsit5(de.Rosenbrock23()),
+                        saveat=ts.t, **integrator_kwargs)
+                    t = ode_solution.t.to_numpy()
+                    if t.size > 0:
+                        x = np.empty((t.size, self._num_vars))
+                        for i in range(t.size):
+                            x[i, :] = ode_solution.u[i]
+                        pred_data.append(TimeSeries(t, x))
+                    else:
+                        pred_data.append(None)
 
     def _get_aicc(self, pred_data: list[TimeSeries],
                   ref_data: list[TimeSeries]) -> dict[str, Any]:

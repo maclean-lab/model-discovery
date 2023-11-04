@@ -50,18 +50,31 @@ class DynamicalModel(metaclass=ABCMeta):
             t (np.ndarray | None, optional): time points. Defaults to None, in
                 which case the default time points are used.
         """
+        # set parameter values
         if param_values is None:
             self._param_values = self._DEFAULT_PARAM_VALUES.copy()
         else:
             self.__check_params(param_values)
             self._param_values = param_values.copy()
 
+        # set default parameter names
+        if not self._PARAM_NAMES:
+            self._PARAM_NAMES = [
+                f'param_{i}' for i in range(len(self._param_values))]
+
+        # set initial conditions
         if x0 is None:
             self._x0 = self._DEFAULT_X0.copy()
         else:
             self.__check_x0(x0)
             self._x0 = x0.copy()
 
+        # set default variable names
+        if not self._VARIABLE_NAMES:
+            self._VARIABLE_NAMES = [
+                f'x_{i}' for i in range(self._NUM_VARIABLES)]
+
+        # set time points
         if t is None:
             self._t = self._DEFAULT_T.copy()
             self._t_step = self._DEFAULT_T_STEP
