@@ -45,8 +45,7 @@ def search_time_steps(search_config, verbose=False):
         ts_learner.output_prefix = f't_step_{t_step:.2f}_ude'
         ts_learner.eval(t_eval=t_train, x0_eval=x0_train,
                         ref_data=train_sample, integrator_backend='scipy',
-                        integrator_kwargs={'method': 'LSODA',
-                                           'min_step': 1e-8},
+                        integrator_kwargs={'method': 'LSODA'},
                         sub_modules=['latent'], verbose=verbose,
                         show_progress=False)
         ts_learner.plot_pred_data(ref_data=train_sample)
@@ -161,16 +160,15 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
     # run SINDy with given settings
     eq_learner = OdeSystemLearner(sindy_train_sample, output_dir,
                                   output_prefix)
-    valid_kwargs = {'eval_func': recovered_dynamics,
-                    'integrator_backend': search_config['integrator_backend']}
-    match search_config['integrator_backend']:
-        case 'scipy':
-            valid_kwargs['integrator_kwargs'] = {'args': ('model', ),
-                                                 'method': 'LSODA',
-                                                 'events': stop_events,
-                                                 'min_step': 1e-8}
-        case 'diffeqpy':
-            valid_kwargs['integrator_kwargs'] = {'maxiters': 10000}
+    valid_kwargs = {
+        'eval_func': recovered_dynamics,
+        'integrator_kwargs': {
+            'args': ('model', ),
+            'method': 'LSODA',
+            'events': stop_events,
+            'min_step': 1e-8,
+        },
+    }
     eq_learner.train(optimizer_type=sindy_optimizers[optimizer_name],
                      threshold=search_config['stlsq_threshold'],
                      learn_dx=True, normalize_columns=normalize_columns,
@@ -196,16 +194,11 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
     print('Saved metrics of the learned SINDy model', flush=True)
 
     # evaluate model on test sample
-    match search_config['integrator_backend']:
-        case 'scipy':
-            eval_integrator_kwargs = {'args': (eq_learner.model, ),
-                                      'method': 'LSODA',
-                                      'events': stop_events,
-                                      'min_step': 1e-8}
-        case 'diffeqpy':
-            eval_integrator_kwargs = {'maxiters': 10000}
+    eval_integrator_kwargs = {'args': (eq_learner.model, ),
+                              'method': 'LSODA',
+                              'events': stop_events,
+                              'min_step': 1e-8}
     eq_learner.eval(eval_data=test_sample, eval_func=recovered_dynamics,
-                    integrator_backend=search_config['integrator_backend'],
                     integrator_kwargs=eval_integrator_kwargs,
                     verbose=verbose)
     eq_learner.plot_pred_data(output_suffix='pred_data_long')
@@ -244,10 +237,7 @@ def get_args():
     arg_parser.add_argument('--t_sindy_span', nargs=2, type=float,
                             default=[-np.inf, np.inf], metavar=('T0', 'T_END'),
                             help='Time span of SINDy training data')
-    arg_parser.add_argument('--integrator_backend', type=str, default='scipy',
-                            choices=['scipy', 'diffeqpy'],
-                            help='Backend of ODE integrator')
-    arg_parser.add_argument('--backend', type=str, default='Agg',
+    arg_parser.add_argument('--matplotlib_backend', type=str, default='Agg',
                             help='Matplotlib backend to use')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
@@ -274,7 +264,7 @@ def main():
     # TODO: move certain parts to a separate function
     # E.g. data loading, UDE model loading, basis function setup
     args = get_args()
-    matplotlib.use(args.backend)
+    matplotlib.use(args.matplotlib_backend)
     verbose = args.verbose
 
     # initialize model and data
@@ -408,7 +398,6 @@ def main():
     search_config['sindy_optimizer_args'] = {
         'stlsq': {'alpha': [0.05, 0.1, 0.5, 1.0, 5.0, 10.0]}}
     search_config['rng'] = default_rng(seed)
-    search_config['integrator_backend'] = args.integrator_backend
 
     # model specific setup
     match args.model:

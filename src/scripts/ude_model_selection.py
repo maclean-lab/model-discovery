@@ -102,6 +102,7 @@ def main():
     print(f'- Training sample size: {len(train_sample)}', flush=True)
     print(f'- Validation sample size: {len(valid_sample)}', flush=True)
 
+    # TODO: use learned LSTM model to preprocess validation data
     # align time span of validation data with that of training data
     # necessary for data preprocessed by LSTM
     if len(valid_sample[0]) > len(train_sample[0]):
