@@ -188,8 +188,10 @@ def main():
                          num_epochs, integrator_backend=integrator_backend,
                          torchode_step_method=args.torchode_step_method,
                          valid_data=valid_sample,
-                         valid_kwargs={'integrator_backend': 'scipy',
-                                       'verbose': False},
+                         valid_kwargs={
+                             'integrator_backend': 'scipy',
+                             'integrator_kwargs': {'method': 'LSODA'},
+                             'verbose': False},
                          save_epoch_model=True, verbose=verbose,
                          show_progress=verbose)
         ts_learner.plot_training_losses(output_suffix='training_losses')
