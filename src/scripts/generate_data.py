@@ -78,14 +78,14 @@ def get_args():
                             metavar=x_min_meta_names,
                             help='Lower bounds of generated data')
 
-    # sample size related arguments
-    arg_parser.add_argument('--train_sample_size', type=int, default=200,
+    # dataset size related arguments
+    arg_parser.add_argument('--num_train_samples', type=int, default=200,
                             metavar='N_TRAIN',
                             help='Number of training samples to generate')
-    arg_parser.add_argument('--valid_sample_size', type=int, default=50,
+    arg_parser.add_argument('--num_valid_samples', type=int, default=50,
                             metavar='N_VALID',
                             help='Number of validation samples to generate')
-    arg_parser.add_argument('--test_sample_size', type=int, default=50,
+    arg_parser.add_argument('--num_test_samples', type=int, default=50,
                             metavar='N_TEST',
                             help='Number of test samples to generate')
 
@@ -145,12 +145,12 @@ def main():
             model.t = np.arange(t_span[0], t_span[1] + t_step / 100, t_step)
             data_group.attrs['t_span'] = t_span
             data_group.attrs['t_step'] = t_step
-            sample_size = getattr(args, f'{dataset_type}_sample_size')
-            data_group.attrs['sample_size'] = sample_size
+            num_samples = getattr(args, f'num_{dataset_type}_samples')
+            data_group.attrs['num_samples'] = num_samples
 
             # save samples
-            samples = model.get_sample(
-                sample_size, noise_type=noise_type, noise_level=noise_level,
+            samples = model.get_samples(
+                num_samples, noise_type=noise_type, noise_level=noise_level,
                 clean_x0=args.clean_x0, bounds=data_bounds, rng=rng)
 
             for idx, sample in enumerate(samples):

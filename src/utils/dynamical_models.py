@@ -271,19 +271,20 @@ class DynamicalModel(metaclass=ABCMeta):
 
         return TimeSeries(solution.t, solution.y.T)
 
-    def get_sample(self, sample_size: int,
-                   noise_type:
-                   Literal['additive', 'multiplicative'] = 'additive',
-                   noise_level: float = 0.0, clean_x0: bool = False,
-                   bounds: list[tuple[float, float]] | None = None,
-                   rng: Optional[np.random.Generator] = None,
-                   ) -> list[TimeSeries]:
-        """Generate a sample of noisy time series from the model.
+    def get_samples(self, num_samples: int,
+                    noise_type:
+                    Literal['additive', 'multiplicative'] = 'additive',
+                    noise_level: float = 0.0, clean_x0: bool = False,
+                    bounds: list[tuple[float, float]] | None = None,
+                    integrator_kwargs: dict | None = None,
+                    rng: Optional[np.random.Generator] = None,
+                    ) -> list[TimeSeries]:
+        """Generate time series samples from the model.
 
         Can generate noiseless time series if noise_level is set to 0.0.
 
         Args:
-            sample_size (int): the number of time series in the sample.
+            num_samples (int): the number of time series to generate.
             noise_type (Literal['additive', 'multiplicative'], optional): the
                 type of noise to add to the data. Defaults to 'additive'.
             noise_level (float, optional): the level of noise. Defaults to 0.0.
@@ -320,15 +321,20 @@ class DynamicalModel(metaclass=ABCMeta):
                 bounds[i] = tuple(processed_bounds)
 
         # get clean data
+        if integrator_kwargs is None:
+            integrator_kwargs = {}
+        integrator_kwargs['t_eval'] = self._t
+        if 'method' not in integrator_kwargs:
+            integrator_kwargs['method'] = 'LSODA'
         t_span = (self._t[0], self._t[-1])
-        x = self.simulate(t_span, self._x0, t_eval=self._t).x
+        x = self.simulate(t_span, self._x0, **integrator_kwargs).x
 
         # initialize random number generator
         if rng is None:
             rng = np.random.default_rng()
 
-        # generate sample
-        ts_sample = []
+        # generate samples
+        ts_samples = []
 
         match noise_type:
             case 'additive':
@@ -338,7 +344,7 @@ class DynamicalModel(metaclass=ABCMeta):
                 # noise_scale.shape = x.shape = (t.size, num_vars)
                 noise_scale = noise_level * x
 
-        for _ in range(sample_size):
+        for _ in range(num_samples):
             if noise_level > 0:
                 # generate a noisy observation
                 x_noise = rng.normal(size=x.shape) * noise_scale
@@ -356,10 +362,10 @@ class DynamicalModel(metaclass=ABCMeta):
                 if lb is not None or ub is not None:
                     x_obs[:, i] = np.clip(x_obs[:, i], lb, ub)
 
-            # add observation to sample
-            ts_sample.append(TimeSeries(self._t, x_obs))
+            # add observation to samples
+            ts_samples.append(TimeSeries(self._t, x_obs))
 
-        return ts_sample
+        return ts_samples
 
 
 class EcosystemModel(DynamicalModel):

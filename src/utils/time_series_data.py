@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset as TorchDataset
 from torch.utils.data import DataLoader as TorchDataLoader
+import h5py
 
 
 class TimeSeries:
@@ -269,8 +270,8 @@ def get_dataloader(
             information. Defaults to 'sample'.
         dtype (type, optional): data type of the time series. Defaults to
             torch.float32.
-        shuffle (bool, optional): whether to shuffle observations in the
-            dataset. Defaults to True.
+        shuffle (bool, optional): whether to shuffle samples in the dataset.
+            Defaults to True.
     """
     dataset = TimeSeriesDataset(
         data, window_size=window_size, window_order=window_order, dtype=dtype)
@@ -280,12 +281,29 @@ def get_dataloader(
     return dataloader
 
 
-def load_sample_from_h5(h5_fd, data_type):
-    sample = []
-    data_group = h5_fd[data_type]
+def load_dataset_from_h5(h5_fd: h5py.File, dataset_name: str
+                         ) -> list[TimeSeries]:
+    '''
+    Load a dataset from a HDF5 file.
 
-    for i in range(data_group.attrs['sample_size']):
+    Note dataset here means a collection of time series, not a HDF5 dataset.
+    Each time series dataset is stored as a HDF5 group in the HDF5. Each time
+    series sample is stored as a HDF5 data group. Within each data group, the
+    time points are stored as a HDF5 dataset named 't' and the values are
+    stored as a HDF5 dataset named 'x'.
+
+    Args:
+        h5_fd (h5py.File): HDF5 file descriptor.
+        dataset_name (str): name of the dataset.
+
+    Returns:
+        list[TimeSeries]: list of time series in the dataset.
+    '''
+    samples = []
+    data_group = h5_fd[dataset_name]
+
+    for i in range(data_group.attrs['num_samples']):
         data = data_group[f'sample_{i:04d}']
-        sample.append(TimeSeries(data['t'][...], data['x'][...]))
+        samples.append(TimeSeries(data['t'][...], data['x'][...]))
 
-    return sample
+    return samples

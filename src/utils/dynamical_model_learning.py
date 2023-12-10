@@ -261,11 +261,14 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
                        ref_data: list[TimeSeries] | None = None,
                        ref_data_labels: list[str] | None = None,
                        pred_data_labels: list[str] | None = None,
-                       color_scheme: Literal['mpl', 'alt'] = 'mpl') -> None:
+                       color_scheme: Literal['mpl', 'alt'] = 'mpl',
+                       figure_size: tuple[float, float] = (6.0, 4.0),
+                       x_label: str = 'Time', y_label: str = 'Value') -> None:
         """Plot prediction data.
 
         Only valid after calling the `eval()` method. If reference data is
-        provided, it is plotted with lighter colors.
+        provided, it is plotted with lighter colors. One prediction sample per
+        page.
 
         Args:
             output_suffix (str): suffix for output file (without extension).
@@ -279,6 +282,9 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
             color_scheme (Literal['mpl', 'alt']): color scheme to use. Default
                 is 'mpl' for Matplotlib colors (C0, C1, ...), 'alt' for
                 alternative colors.
+            figure_size (tuple[float, float]): size of each page in inches.
+            x_label (str): label of x-axis.
+            y_label (str): label of y-axis.
         """
         figure_path = os.path.join(
             self._output_dir, f'{self._output_prefix}_{output_suffix}.pdf')
@@ -303,7 +309,7 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
         # plot all pairs of ref_data and pred_data
         with PdfPages(figure_path) as pdf:
             for ts_pred, ts_ref in zip(self._pred_data, ref_data):
-                plt.figure(figsize=(6, 4))
+                plt.figure(figsize=figure_size)
 
                 # plot ref_data
                 if plot_ref_data and ts_ref is not None:
@@ -319,8 +325,8 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
                                  color=data_colors[i],
                                  label=pred_data_labels[i])
 
-                plt.xlabel('Time')
-                plt.ylabel('Value')
+                plt.xlabel(x_label)
+                plt.ylabel(y_label)
                 plt.legend()
 
                 pdf.savefig()
@@ -1386,7 +1392,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         if eval_data is None:
             eval_data = self._train_data
         self._eval_data = eval_data
-        eval_sample_size = len(eval_data)
+        num_eval_samples = len(eval_data)
         self._pred_data = []
 
         # set up integrator
@@ -1409,11 +1415,11 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         for ts_eval, ts_pred in zip(self._eval_data, self._pred_data):
             if ts_pred is not None and np.array_equal(ts_eval.t, ts_pred.t):
                 num_successes += 1
-        self._eval_metrics['success_rate'] = num_successes / eval_sample_size
+        self._eval_metrics['success_rate'] = num_successes / num_eval_samples
 
         if verbose:
             print('Evaluation finished', flush=True)
-            print('Number of evaluation samples:', eval_sample_size,
+            print('Number of evaluation samples:', num_eval_samples,
                   flush=True)
             print('Number of successful evaluations:', num_successes,
                   flush=True)

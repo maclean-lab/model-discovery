@@ -8,8 +8,10 @@ import torch
 from torch import nn
 import h5py
 
-from time_series_data import load_sample_from_h5
+from time_series_data import load_dataset_from_h5
+from dynamical_model_learning import NeuralTimeSeriesLearner
 from dynamical_model_learning import NeuralDynamicsLearner
+from lstm_model_selection import LstmDynamics
 from model_helpers import get_model_module, get_model_prefix, print_hrule
 
 
@@ -28,9 +30,11 @@ def get_args():
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
-    arg_parser.add_argument('--data_source', type=str, default='raw',
-                            help='Source of training data, raw or '
-                            'preprocessed')
+    arg_parser.add_argument('--data_source', type=str, required=True,
+                            choices=['raw', 'clean_x0'],
+                            help='Source of training data')
+    arg_parser.add_argument('--data_preprocessor', type=str, default='none',
+                            help='Preprocessing method for training data')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
@@ -75,6 +79,7 @@ def main():
     noise_level = args.noise_level
     seed = args.seed
     data_source = args.data_source
+    data_preprocessor = args.data_preprocessor
     print('Loading data...', flush=True)
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -85,9 +90,53 @@ def main():
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
-    train_sample = load_sample_from_h5(data_fd, 'train')
-    valid_sample = load_sample_from_h5(data_fd, 'valid')
+    train_samples = load_dataset_from_h5(data_fd, 'train')
+    valid_samples = load_dataset_from_h5(data_fd, 'valid')
+    num_vars = train_samples[0].num_vars
     data_fd.close()
+
+    # use learned LSTM model to preprocess training and validation data
+    if data_preprocessor.startswith('lstm_'):
+        # retrieve information about the best LSTM model
+        lstm_output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
+        lstm_output_dir += data_preprocessor.replace('_', '-')
+        lstm_output_dir = os.path.join(
+            project_root, 'outputs', lstm_output_dir,
+            f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}')
+        num_hidden_features = data_preprocessor.split('_')[1]
+        num_layers = data_preprocessor.split('_')[2]
+        lstm_metrics_path = os.path.join(
+            lstm_output_dir, 'lstm_model_metrics.csv')
+        lstm_model_metrics = pd.read_csv(lstm_metrics_path, index_col=False)
+        if len(lstm_model_metrics) == 0:
+            print('LSTM data preprocessor specified but no LSTM model was '
+                  'successfully trained; will not train UDE models',
+                  flush=True)
+            return
+        best_lstm_row = lstm_model_metrics['best_valid_loss'].idxmin()
+        learning_rate = lstm_model_metrics.loc[best_lstm_row, 'learning_rate']
+        window_size = lstm_model_metrics.loc[best_lstm_row, 'window_size']
+        batch_size = lstm_model_metrics.loc[best_lstm_row, 'batch_size']
+        best_epoch = lstm_model_metrics.loc[best_lstm_row, 'best_epoch']
+
+        # preprocess data
+        output_prefix = f'lr_{learning_rate:.3f}_window_size_{window_size:02d}'
+        output_prefix += f'_batch_size_{batch_size:02d}'
+        input_mask = torch.full((window_size, ), True, dtype=torch.bool)
+        input_mask[window_size // 2] = False
+        ts_learner = NeuralTimeSeriesLearner(train_samples, lstm_output_dir,
+                                             output_prefix)
+        lstm_dynamics = LstmDynamics(num_vars, window_size,
+                                     num_hidden_features, num_layers)
+        ts_learner.load_model(
+            lstm_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}',
+            input_mask=input_mask)
+        ts_learner.eval(eval_data=train_samples, method='rolling',
+                        show_progress=False)
+        train_samples = ts_learner.pred_data
+        ts_learner.eval(eval_data=valid_samples, method='rolling',
+                        show_progress=False)
+        valid_samples = ts_learner.pred_data
 
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)
@@ -97,36 +146,26 @@ def main():
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
     print(f'- Data source: {data_source}', flush=True)
+    print(f'- Data preprocessor: {data_preprocessor}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
     print(f'- Time span of training data: ({t_span_str})', flush=True)
-    print(f'- Training sample size: {len(train_sample)}', flush=True)
-    print(f'- Validation sample size: {len(valid_sample)}', flush=True)
-
-    # TODO: use learned LSTM model to preprocess validation data
-    # align time span of validation data with that of training data
-    # necessary for data preprocessed by LSTM
-    if len(valid_sample[0]) > len(train_sample[0]):
-        t_idx = np.intersect1d(valid_sample[0].t, train_sample[0].t,
-                               return_indices=True)[1]
-        valid_sample = [vs[t_idx] for vs in valid_sample]
-        print('Validation data has longer time span than training data does;'
-              ' aligned with training data', flush=True)
+    print(f'- Training dataset size: {len(train_samples)}', flush=True)
+    print(f'- Validation dataset size: {len(valid_samples)}', flush=True)
 
     print_hrule()
 
     # set up for output files
     print('Setting up training...', flush=True)
-    output_dir = f'{model_prefix}-'
-    if data_source != 'raw':
-        output_dir += data_source.replace('_', '-')
+    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
+    if data_preprocessor != 'none':
+        output_dir += data_preprocessor.replace('_', '-')
         output_dir += '-ude-'
     else:
         output_dir += 'ude-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
-    output_dir = os.path.join(project_root, 'outputs', output_dir)
     output_dir = os.path.join(
-        output_dir,
+        project_root, 'outputs', output_dir,
         f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
         '-ude-model-selection')
 
@@ -182,12 +221,12 @@ def main():
                     num_hidden_neurons=args.num_hidden_neurons,
                     activation=args.activation)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
-        ts_learner = NeuralDynamicsLearner(train_sample, output_dir,
+        ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
                                            output_prefix)
         ts_learner.train(hybrid_dynamics, loss_func, optimizer, lr, ws, bs,
                          num_epochs, integrator_backend=integrator_backend,
                          torchode_step_method=args.torchode_step_method,
-                         valid_data=valid_sample,
+                         valid_data=valid_samples,
                          valid_kwargs={
                              'integrator_backend': 'scipy',
                              'integrator_kwargs': {'method': 'LSODA'},
@@ -212,7 +251,8 @@ def main():
             # evaluate the best model on training data
             best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
             ts_learner.load_model(hybrid_dynamics, best_epoch_model_suffix)
-            ts_learner.eval(eval_data=train_sample, integrator_backend='scipy',
+            ts_learner.eval(eval_data=train_samples,
+                            integrator_backend='scipy',
                             integrator_kwargs={'method': 'LSODA'},
                             sub_modules=['latent'], show_progress=False)
             ts_learner.plot_pred_data()

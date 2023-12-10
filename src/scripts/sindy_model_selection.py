@@ -10,33 +10,35 @@ from pysindy import STLSQ
 import h5py
 import matplotlib
 
-from time_series_data import load_sample_from_h5
+from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from dynamical_model_learning import OdeSystemLearner
-from model_helpers import get_model_module, get_model_prefix, print_hrule
+from model_helpers import get_model_module, get_model_prefix, get_sindy_config
+from model_helpers import print_hrule
 
 
 def search_time_steps(search_config, verbose=False):
     t_sindy_span = search_config['t_sindy_span']
     ts_learner = search_config['ts_learner']
-    train_sample = search_config['train_sample']
-    ude_train_sample = search_config['ude_train_sample']
-    train_sample_size = len(ude_train_sample)
+    train_samples = search_config['train_samples']
+    ude_train_samples = search_config['ude_train_samples']
+    num_train_samples = len(ude_train_samples)
 
     # evaluate on UDE training time span
+    # TODO: if specified, preprocess by LSTM
     for t_step in search_config['t_ude_steps']:
         print(f'Generating UDE dynamics on t_step {t_step:.03f} for SINDy '
               'training...', flush=True)
         t_train = [np.arange(ts.t[0], ts.t[-1] + t_step * 1e-3, t_step)
-                   for ts in ude_train_sample]
-        x0_train = [ts.x[0, :] for ts in ude_train_sample]
+                   for ts in ude_train_samples]
+        x0_train = [ts.x[0, :] for ts in ude_train_samples]
 
         # generate UDE dynamics with slightly different initial conditions
         # if all initial conditions are the same
         if all(np.array_equal(x0_train[0], x0) for x0 in x0_train):
             x0_base = x0_train[0]
             x0_train = []
-            for _ in range(train_sample_size):
+            for _ in range(num_train_samples):
                 x0_noise_scale = search_config['rng'].normal(
                     scale=search_config['noise_level'], size=x0_base.shape)
                 x0_noise_scale = np.clip(x0_noise_scale, -0.01, 0.01)
@@ -44,13 +46,13 @@ def search_time_steps(search_config, verbose=False):
 
         ts_learner.output_prefix = f't_step_{t_step:.2f}_ude'
         ts_learner.eval(t_eval=t_train, x0_eval=x0_train,
-                        ref_data=train_sample, integrator_backend='scipy',
+                        ref_data=train_samples, integrator_backend='scipy',
                         integrator_kwargs={'method': 'LSODA'},
                         sub_modules=['latent'], verbose=verbose,
                         show_progress=False)
-        ts_learner.plot_pred_data(ref_data=train_sample)
+        ts_learner.plot_pred_data(ref_data=train_samples)
 
-        sindy_train_sample = []
+        sindy_train_samples = []
         for ts, dx_pred in zip(ts_learner.pred_data,
                                ts_learner.sub_pred_data['latent']):
             ts = ts.copy()
@@ -64,45 +66,46 @@ def search_time_steps(search_config, verbose=False):
                                  'time span')
             ts = ts[t_sindy_indices]
 
-            sindy_train_sample.append(ts)
+            sindy_train_samples.append(ts)
 
         print('UDE dynamics generated')
         print_hrule()
 
-        search_basis(search_config, sindy_train_sample, {'t_step': t_step},
+        search_basis(search_config, sindy_train_samples, {'t_step': t_step},
                      verbose=verbose)
 
 
-def search_basis(search_config, sindy_train_sample, model_info, verbose=False):
+def search_basis(search_config, sindy_train_samples, model_info,
+                 verbose=False):
     for basis_name in search_config['basis_libs']:
         model_info_new = model_info.copy()
         model_info_new['basis'] = basis_name
 
-        search_basis_normalization(search_config, sindy_train_sample,
+        search_basis_normalization(search_config, sindy_train_samples,
                                    model_info_new, verbose=verbose)
 
 
-def search_basis_normalization(search_config, sindy_train_sample, model_info,
+def search_basis_normalization(search_config, sindy_train_samples, model_info,
                                verbose=False):
     for normalize_columns in [False, True]:
         model_info_new = model_info.copy()
         model_info_new['basis_normalized'] = normalize_columns
 
-        search_optimizers(search_config, sindy_train_sample, model_info_new,
+        search_optimizers(search_config, sindy_train_samples, model_info_new,
                           verbose=verbose)
 
 
-def search_optimizers(search_config, sindy_train_sample, model_info,
+def search_optimizers(search_config, sindy_train_samples, model_info,
                       verbose=False):
     for optimizer_name in search_config['sindy_optimizers']:
         model_info_new = model_info.copy()
         model_info_new['optimizer'] = optimizer_name
 
-        search_optimizer_args(search_config, sindy_train_sample,
+        search_optimizer_args(search_config, sindy_train_samples,
                               model_info_new, verbose=verbose)
 
 
-def search_optimizer_args(search_config, sindy_train_sample, model_info,
+def search_optimizer_args(search_config, sindy_train_samples, model_info,
                           verbose=False):
     sindy_optimizer_args = search_config['sindy_optimizer_args']
     optimizer_name = model_info['optimizer']
@@ -113,19 +116,19 @@ def search_optimizer_args(search_config, sindy_train_sample, model_info,
         model_info_new = model_info.copy()
         model_info_new['optimizer_args'] = dict(zip(arg_names, arg_vals))
 
-        get_sindy_model(search_config, sindy_train_sample, model_info_new,
+        get_sindy_model(search_config, sindy_train_samples, model_info_new,
                         verbose=verbose)
 
 
-def get_sindy_model(search_config, sindy_train_sample, model_info,
+def get_sindy_model(search_config, sindy_train_samples, model_info,
                     verbose=False):
     # unpack search config
     output_dir = search_config['output_dir']
     sindy_optimizers = search_config['sindy_optimizers']
     basis_libs = search_config['basis_libs']
     basis_strs = search_config['basis_strs']
-    valid_sample = search_config['valid_sample']
-    test_sample = search_config['test_sample']
+    valid_samples = search_config['valid_samples']
+    test_samples = search_config['test_samples']
     recovered_dynamics = search_config['recovered_dynamics']
     stop_events = search_config['stop_events']
     model_metrics = search_config['model_metrics']
@@ -158,7 +161,7 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
     print(f'optimizer_args = {optimizer_args}', flush=True)
 
     # run SINDy with given settings
-    eq_learner = OdeSystemLearner(sindy_train_sample, output_dir,
+    eq_learner = OdeSystemLearner(sindy_train_samples, output_dir,
                                   output_prefix)
     valid_kwargs = {
         'eval_func': recovered_dynamics,
@@ -174,7 +177,7 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
                      learn_dx=True, normalize_columns=normalize_columns,
                      basis_funcs=basis_libs[basis],
                      basis_names=basis_strs[basis],
-                     optimizer_kwargs=optimizer_args, valid_data=valid_sample,
+                     optimizer_kwargs=optimizer_args, valid_data=valid_samples,
                      valid_kwargs=valid_kwargs, verbose=verbose)
     print('SINDy learning finished', flush=True)
 
@@ -198,7 +201,7 @@ def get_sindy_model(search_config, sindy_train_sample, model_info,
                               'method': 'LSODA',
                               'events': stop_events,
                               'min_step': 1e-8}
-    eq_learner.eval(eval_data=test_sample, eval_func=recovered_dynamics,
+    eq_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
                     integrator_kwargs=eval_integrator_kwargs,
                     verbose=verbose)
     eq_learner.plot_pred_data(output_suffix='pred_data_long')
@@ -224,8 +227,10 @@ def get_args():
                             help='Noise level of training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
-    arg_parser.add_argument('--ude_data_source', type=str, default='raw',
+    arg_parser.add_argument('--data_source', type=str, default='raw',
                             help='Data source for UDE model training')
+    arg_parser.add_argument('--data_preprocessor', type=str, default='none',
+                            help='Preprocessing method for training data')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
@@ -247,22 +252,20 @@ def get_args():
 
 # set up boundary check for integration
 def get_lower_bound_checker(lower_bound):
-    def check_lower_bound(t, x, model):
+    def check_lower_bound(t, x, model=None):
         return float(np.all(x > lower_bound))
 
     return check_lower_bound
 
 
 def get_upper_bound_checker(upper_bound):
-    def check_upper_bound(t, x, model):
+    def check_upper_bound(t, x, model=None):
         return float(np.all(x < upper_bound))
 
     return check_upper_bound
 
 
 def main():
-    # TODO: move certain parts to a separate function
-    # E.g. data loading, UDE model loading, basis function setup
     args = get_args()
     matplotlib.use(args.matplotlib_backend)
     verbose = args.verbose
@@ -276,17 +279,26 @@ def main():
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
     model_prefix = get_model_prefix(args.model)
+    data_source = args.data_source
+    data_preprocessor = args.data_preprocessor
     data_path = os.path.join(
         project_root, 'data',
         f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_raw.h5')
+        f'_seed_{seed:04d}_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
-    train_sample = load_sample_from_h5(data_fd, 'train')
-    valid_sample = load_sample_from_h5(data_fd, 'valid')
-    test_sample = load_sample_from_h5(data_fd, 'test')
+    train_samples = load_dataset_from_h5(data_fd, 'train')
+    valid_samples = load_dataset_from_h5(data_fd, 'valid')
+    test_samples = load_dataset_from_h5(data_fd, 'test')
     data_fd.close()
+
+    # TODO: preprocess data with LSTM
+    if 'lstm' in data_preprocessor:
+        pass
+    else:
+        search_config['ude_train_samples'] = train_samples
+
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
@@ -294,24 +306,23 @@ def main():
     print(f'- Noise type: {noise_type}', flush=True)
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
+    print(f'- Data source: {data_source}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
     print(f'- Time span of training data: ({t_span_str})', flush=True)
-    print(f'- Training sample size: {len(train_sample)}', flush=True)
-    print(f'- Validation sample size: {len(valid_sample)}', flush=True)
-    print(f'- Test sample size: {len(valid_sample)}', flush=True)
+    print(f'- Training dataset size: {len(train_samples)}', flush=True)
+    print(f'- Validation dataset size: {len(valid_samples)}', flush=True)
+    print(f'- Test dataset size: {len(valid_samples)}', flush=True)
 
     print_hrule()
 
     # load learned UDE model
     print('Loading UDE model with lowest validation loss...', flush=True)
-    ude_data_source = args.ude_data_source
-    print(f'UDE data source: {ude_data_source}', flush=True)
     print('Network architecture:', flush=True)
     print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
     print(f'- Activation function: {args.activation}', flush=True)
-    output_dir = f'{model_prefix}-'
-    if ude_data_source != 'raw':
-        output_dir += ude_data_source.replace('_', '-')
+    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
+    if data_preprocessor != 'none':
+        output_dir += data_preprocessor.replace('_', '-')
         output_dir += '-ude-'
     else:
         output_dir += 'ude-'
@@ -348,26 +359,23 @@ def main():
             growth_rates = np.array([params_true[0], -params_true[3]])
             hybrid_dynamics = model_module.get_hybrid_dynamics(
                 growth_rates, args.num_hidden_neurons, args.activation)
+
+            def recovered_dynamics(t, x, model):
+                return growth_rates * x + model.predict(x[np.newaxis, :])[0]
+
+            search_config['recovered_dynamics'] = recovered_dynamics
         case 'repressilator':
             hybrid_dynamics = model_module.get_hybrid_dynamics(
                 args.num_hidden_neurons, args.activation)
-    ts_learner = NeuralDynamicsLearner(train_sample, output_dir, output_prefix)
+
+            def recovered_dynamics(t, x, model):
+                return model.predict(x[np.newaxis, :])[0] - x
+
+            search_config['recovered_dynamics'] = recovered_dynamics
+    ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
+                                       output_prefix)
     ts_learner.load_model(
         hybrid_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
-
-    # get training sample used by the UDE model
-    if ude_data_source in ('raw', 'clean_x0'):
-        search_config['ude_train_sample'] = train_sample
-    else:
-        ude_data_path = os.path.join(
-            project_root, 'data',
-            f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-            f'_seed_{seed:04d}_{ude_data_source}.h5')
-        data_fd = h5py.File(ude_data_path, 'r')
-        search_config['ude_train_sample'] = load_sample_from_h5(data_fd,
-                                                                'train')
-        data_fd.close()
-
     print('UDE model loaded', flush=True)
 
     # set up for SINDy model selection
@@ -391,75 +399,19 @@ def main():
         t_sindy_span[1] = t_train_span[1]
     search_config['t_sindy_span'] = tuple(t_sindy_span)
     search_config['ts_learner'] = ts_learner
-    search_config['train_sample'] = train_sample
-    search_config['valid_sample'] = valid_sample
-    search_config['test_sample'] = test_sample
+    search_config['train_samples'] = train_samples
+    search_config['valid_samples'] = valid_samples
+    search_config['test_samples'] = test_samples
     search_config['sindy_optimizers'] = {'stlsq': STLSQ}
     search_config['sindy_optimizer_args'] = {
         'stlsq': {'alpha': [0.05, 0.1, 0.5, 1.0, 5.0, 10.0]}}
     search_config['rng'] = default_rng(seed)
 
     # model specific setup
-    match args.model:
-        case 'lotka_volterra':
-            search_config['stlsq_threshold'] = 0.1
-            search_config['t_ude_steps'] = [0.1, 0.05]
-            search_config['basis_libs'] = {
-                'default': None,
-                'higher_order': [
-                    lambda x: x ** 2, lambda x, y: x * y, lambda x: x ** 3,
-                    lambda x, y: x * x * y, lambda x, y: x * y * y
-                ]}
-            search_config['basis_strs'] = {
-                'default': None,
-                'higher_order': [
-                    lambda x: f'{x}^2', lambda x, y: f'{x} {y}',
-                    lambda x: f'{x}^3', lambda x, y: f'{x}^2 {y}',
-                    lambda x, y: f'{x} {y}^2'
-                ]
-            }
-
-            def recovered_dynamics(t, x, model):
-                return growth_rates * x + model.predict(x[np.newaxis, :])[0]
-
-            search_config['recovered_dynamics'] = recovered_dynamics
-        case 'repressilator':
-            search_config['stlsq_threshold'] = 1.0
-            search_config['t_ude_steps'] = [0.2, 0.1]
-            search_config['basis_libs'] = {
-                'hill_1': [lambda x: 1.0 / (1.0 + x)],
-                'hill_2': [lambda x: 1.0 / (1.0 + x ** 2)],
-                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)],
-                'hill_4': [lambda x: 1.0 / (1.0 + x ** 4)],
-                'hill_max_3': [lambda x: 1.0 / (1.0 + x),
-                               lambda x: 1.0 / (1.0 + x ** 2),
-                               lambda x: 1.0 / (1.0 + x ** 3)],
-                'hill_max_4': [lambda x: 1.0 / (1.0 + x),
-                               lambda x: 1.0 / (1.0 + x ** 2),
-                               lambda x: 1.0 / (1.0 + x ** 3),
-                               lambda x: 1.0 / (1.0 + x ** 4)]
-            }
-            search_config['basis_strs'] = {
-                'hill_1': [lambda x: f'/(1+{x})'],
-                'hill_2': [lambda x: f'/(1+{x}^2)'],
-                'hill_3': [lambda x: f'/(1+{x}^3)'],
-                'hill_4': [lambda x: f'/(1+{x}^4)'],
-                'hill_max_3': [lambda x: f'/(1+{x})',
-                               lambda x: f'/(1+{x}^2)',
-                               lambda x: f'/(1+{x}^3)'],
-                'hill_max_4': [lambda x: f'/(1+{x})',
-                               lambda x: f'/(1+{x}^2)',
-                               lambda x: f'/(1+{x}^3)',
-                               lambda x: f'/(1+{x}^4)']
-            }
-
-            def recovered_dynamics(t, x, model):
-                return model.predict(x[np.newaxis, :])[0] - x
-
-            search_config['recovered_dynamics'] = recovered_dynamics
+    get_sindy_config(args.model, search_config)
 
     # initialize table for model metrics
-    num_variables = train_sample[0].x.shape[1]
+    num_variables = train_samples[0].x.shape[1]
     model_metric_columns = ['t_step', 'basis', 'basis_normalized', 'optimizer',
                             'optimizer_args', 'mse']
     model_metric_columns.extend(

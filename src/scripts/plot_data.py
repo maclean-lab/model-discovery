@@ -9,7 +9,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from time_series_data import load_sample_from_h5
+from time_series_data import load_dataset_from_h5
 from model_helpers import get_model_class, get_model_prefix
 
 
@@ -61,9 +61,11 @@ def get_args():
                                 help='Noise level of generated data')
         arg_parser.add_argument('--seed', type=int, default=2023,
                                 help='Random seed for generating data')
+        arg_parser.add_argument('--data_source', type=str, default='raw',
+                                help='Source of generated data, e.g. raw')
         arg_parser.add_argument('--dataset', type=str, default='train',
                                 choices=['train', 'valid', 'test'],
-                                help='Dataset to generate data from')
+                                help='Dataset to plot, e.g. train')
 
     # figure related arguments
     arg_parser.add_argument('--backend', type=str, default='Agg',
@@ -73,6 +75,10 @@ def get_args():
                             help='Figure size in inches')
     arg_parser.add_argument('--figure_dpi', type=int, default=300,
                             help='Figure resolution in dots per inch')
+    arg_parser.add_argument('--x_label', type=str, nargs='?', const='',
+                            default='Time', help='Label of x-axis')
+    arg_parser.add_argument('--y_label', type=str, nargs='?', const='',
+                            default='Value', help='Label of y-axis')
 
     return arg_parser.parse_args()
 
@@ -96,9 +102,9 @@ def plot_true_data(args):
 
     plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
     plt.plot(t, x, label=model.get_variable_names())
-    plt.xlabel('Time')
-    plt.legend()
-    plt.savefig(figure_path)
+    plt.xlabel(args.x_label)
+    plt.ylabel(args.y_label)
+    plt.savefig(figure_path, transparent=True)
     plt.close('all')
 
 
@@ -107,6 +113,8 @@ def plot_noisy_data(args):
     noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
+    data_source = args.data_source
+    dataset = args.dataset
 
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -114,39 +122,50 @@ def plot_noisy_data(args):
     data_path = os.path.join(
         project_root, 'data',
         f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_raw.h5')
+        f'_seed_{seed:04d}_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
-    sample = load_sample_from_h5(data_fd, args.dataset)
+    samples = load_dataset_from_h5(data_fd, args.dataset)
     data_fd.close()
     output_dir = os.path.join(project_root, 'outputs', f'{model_prefix}-data')
-
-    # convert data to long form
-    model_class = get_model_class(args.model)
-    var_names = model_class.get_variable_names()
-    long_data = pd.DataFrame(
-        columns=['SampleIndex', 'Time', 'Variable', 'Value'])
-    for i, s in enumerate(sample):
-        for j, t in enumerate(s.t):
-            for k, vn in enumerate(var_names):
-                long_data.loc[len(long_data), :] = [i, t, vn, s.x[j, k]]
+    long_data = get_long_data_from_samples(args.model, samples)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    figure_path = f'{noise_type}_noise_{noise_level:.03f}'
-    figure_path += f'_{args.dataset}_data.pdf'
+    figure_path = f'{noise_type}_noise_{noise_level:.03f}_seed_{seed:04d}'
+    figure_path += f'_{data_source}_{dataset}_data.pdf'
     figure_path = os.path.join(output_dir, figure_path)
 
     plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
     g = sns.lineplot(data=long_data, x='Time', y='Value', hue='Variable',
-                     errorbar=('sd', 3))
-    g.legend().set_title(None)
-    plt.savefig(figure_path)
+                     errorbar=('sd', 3), err_style='bars', legend=False,
+                     linewidth=1)
+    g.set_xlabel(args.x_label)
+    g.set_ylabel(args.y_label)
+    plt.savefig(figure_path, transparent=True)
     plt.close('all')
+
+
+def get_long_data_from_samples(model, samples):
+    model_class = get_model_class(model)
+    var_names = model_class.get_variable_names()
+    long_data = pd.DataFrame(
+        columns=['SampleIndex', 'Time', 'Variable', 'Value'])
+
+    for i, s in enumerate(samples):
+        for j, t in enumerate(s.t):
+            for k, vn in enumerate(var_names):
+                long_data.loc[len(long_data), :] = [i, t, vn, s.x[j, k]]
+
+    return long_data
 
 
 def main():
     args = get_args()
     matplotlib.use(args.backend)
+    matplotlib.rcParams['font.family'] = 'sans-serif'
+    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    matplotlib.rcParams['ps.fonttype'] = 42
 
     if args.noise_type == 'none':
         plot_true_data(args)

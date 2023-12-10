@@ -8,7 +8,7 @@ import torch
 from torch import nn
 import h5py
 
-from time_series_data import load_sample_from_h5
+from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralTimeSeriesLearner
 from model_helpers import get_model_prefix, print_hrule
 
@@ -94,16 +94,15 @@ def main():
         f'_seed_{seed:04d}_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
-    x0_true = data_fd.attrs['x0']
     t_spans = {}
     t_steps = {}
-    samples = {}
+    datasets = {}
     for dataset_type in ['train', 'valid', 'test']:
         t_spans[dataset_type] = data_fd[dataset_type].attrs['t_span']
         t_steps[dataset_type] = data_fd[dataset_type].attrs['t_step']
-        samples[dataset_type] = load_sample_from_h5(data_fd, dataset_type)
+        datasets[dataset_type] = load_dataset_from_h5(data_fd, dataset_type)
     data_fd.close()
-    num_vars = samples['train'][0].num_vars
+    num_vars = datasets['train'][0].num_vars
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)
     param_str = ', '.join(str(p) for p in params_true)
@@ -111,20 +110,20 @@ def main():
     print(f'- Noise type: {noise_type}', flush=True)
     print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
+    print(f'- Data source: {data_source}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_spans['train'])
     print(f'- Time span of training data: ({t_span_str})', flush=True)
-    print(f'- Training sample size: {len(samples["train"])}', flush=True)
-    print(f'- Validation sample size: {len(samples["valid"])}', flush=True)
+    print(f'- Training dataset size: {len(datasets["train"])}', flush=True)
+    print(f'- Validation dataset size: {len(datasets["valid"])}', flush=True)
 
     print_hrule()
 
     # set up for output files
     print('Setting up training...', flush=True)
-    output_dir = os.path.join(
-        project_root, 'outputs', f'{model_prefix}-lstm')
+    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-lstm'
     output_dir += f'-{args.num_hidden_features}-{args.num_layers}'
     output_dir = os.path.join(
-        output_dir,
+        project_root, 'outputs', output_dir,
         f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
         '-model-selection')
 
@@ -169,16 +168,15 @@ def main():
         lstm_dynamics = LstmDynamics(num_vars, ws, args.num_hidden_features,
                                      args.num_layers)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
-        ts_learner = NeuralTimeSeriesLearner(samples['train'], output_dir,
+        ts_learner = NeuralTimeSeriesLearner(datasets['train'], output_dir,
                                              output_prefix)
         input_mask = torch.full((ws, ), True, dtype=torch.bool)
         input_mask[ws // 2] = False
         ts_learner.train(lstm_dynamics, loss_func, optimizer, lr, ws, bs,
-                         num_epochs, input_mask,
-                         valid_data=samples['valid'],
+                         num_epochs, input_mask, valid_data=datasets['valid'],
                          valid_kwargs={'method': 'rolling'},
-                         save_epoch_model=True,
-                         verbose=verbose, show_progress=verbose)
+                         save_epoch_model=True, verbose=verbose,
+                         show_progress=verbose)
         ts_learner.plot_training_losses(output_suffix='lstm_training_losses')
         if not verbose:
             print('\nTraining finished', flush=True)
@@ -197,7 +195,7 @@ def main():
             # evaluate the best model on training data
             best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
             ts_learner.load_model(lstm_dynamics, best_epoch_model_suffix)
-            ts_learner.eval(eval_data=samples['train'], method='rolling',
+            ts_learner.eval(eval_data=datasets['train'], method='rolling',
                             show_progress=False)
             ts_learner.plot_pred_data()
             print('Saved plots of dynamics predicted by the best model',
@@ -213,66 +211,6 @@ def main():
     model_metrics_path = os.path.join(output_dir, 'lstm_model_metrics.csv')
     model_metrics.to_csv(model_metrics_path, index=False)
     print('Saved all model metrics', flush=True)
-
-    print_hrule()
-
-    # export smooth data from best model
-    print('Exporting smoothed data from the best model...', flush=True)
-    best_row = model_metrics['best_valid_loss'].idxmin()
-    learning_rate = model_metrics.loc[best_row, 'learning_rate']
-    window_size = model_metrics.loc[best_row, 'window_size']
-    batch_size = model_metrics.loc[best_row, 'batch_size']
-    best_epoch = model_metrics.loc[best_row, 'best_epoch']
-    lstm_dynamics = LstmDynamics(num_vars, window_size,
-                                 args.num_hidden_features, args.num_layers)
-    best_model_prefix = f'lr_{learning_rate:.3f}_window_size_{window_size:02d}'
-    best_model_prefix += f'_batch_size_{batch_size:02d}'
-    best_model_suffix = f'model_state_epoch_{best_epoch:03d}'
-    ts_learner = NeuralTimeSeriesLearner(samples['train'], output_dir,
-                                         best_model_prefix)
-    input_mask = torch.full((window_size, ), True, dtype=torch.bool)
-    input_mask[window_size // 2] = False
-    ts_learner.load_model(lstm_dynamics, output_suffix=best_model_suffix,
-                          input_mask=input_mask)
-    ts_learner.eval(eval_data=samples['train'], method='rolling',
-                    show_progress=False)
-
-    # construct path for LSTM smoothed data
-    # see README.md in the data directory for naming specifications
-    output_data_path = f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-    output_data_path += f'_seed_{seed:04d}_{data_source}'
-    output_data_path += f'_lstm_{args.num_hidden_features}_{args.num_layers}'
-    output_data_path += '.h5'
-    output_data_path = os.path.join(project_root, 'data', output_data_path)
-
-    with h5py.File(output_data_path, 'w') as fd:
-        # save model parameters
-        fd.attrs['noise_type'] = noise_type
-        fd.attrs['noise_level'] = noise_level
-        fd.attrs['param_values'] = params_true
-        fd.attrs['x0'] = x0_true
-        fd.attrs['rng_seed'] = seed
-
-        for dataset_type in ['train', 'valid', 'test']:
-            # create group for dataset
-            data_group = fd.create_group(dataset_type)
-            data_group.attrs['t_span'] = t_spans[dataset_type]
-            data_group.attrs['t_step'] = t_steps[dataset_type]
-
-            # save samples
-            if dataset_type == 'train':
-                sample_data = ts_learner.pred_data
-            else:
-                sample_data = samples[dataset_type]
-
-            data_group.attrs['sample_size'] = len(sample_data)
-
-            for idx, sample in enumerate(sample_data):
-                sample_group = data_group.create_group(f'sample_{idx:04d}')
-                sample_group.create_dataset('t', data=sample.t)
-                sample_group.create_dataset('x', data=sample.x)
-
-    print('Finished exporting smoothed data', flush=True)
 
 
 if __name__ == "__main__":
