@@ -91,7 +91,7 @@ lstm_sindy_learner.eval(eval_data=datasets['test'],
 lstm_sindy_learner.plot_pred_data()
 
 # %%
-# UDE + SINDy
+# UDE (hybrid) + SINDy
 ude_learner = NeuralDynamicsLearner(datasets['train'], output_dir, 'ude')
 growth_rates = np.array([params_true[0], -params_true[3]])
 torch.manual_seed(seed)

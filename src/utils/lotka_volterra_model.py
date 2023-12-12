@@ -5,6 +5,7 @@ import torch
 from torch import nn
 
 from dynamical_models import DynamicalModel
+from dynamical_models import NeuralDynamics, rbf_activation
 
 
 class LotkaVolterraModel(DynamicalModel):
@@ -46,37 +47,6 @@ class LotkaVolterraModel(DynamicalModel):
         return _f
 
 
-class NeuralDynamics(nn.Module):
-    def __init__(self, num_hidden_neurons: list[int], activation: Callable):
-        """Neural network for the latent derivatives.
-
-        Args:
-            num_neurons: number of neurons in each hidden layer.
-            activation: activation function to use between layers.
-        """
-        super().__init__()
-
-        self.activation = activation
-        self.module_list = nn.ModuleList()
-        # input layer
-        self.module_list.append(nn.Linear(2, num_hidden_neurons[0]))
-        # hidden layers
-        for i in range(len(num_hidden_neurons) - 1):
-            self.module_list.append(
-                nn.Linear(num_hidden_neurons[i], num_hidden_neurons[i + 1]))
-        # output layer
-        self.module_list.append(nn.Linear(num_hidden_neurons[-1], 2))
-
-    def forward(self, t, x):
-        dx = self.module_list[0](x)
-
-        for module in self.module_list[1:]:
-            dx = self.activation(dx)
-            dx = module(dx)
-
-        return dx
-
-
 class HybridDynamics(nn.Module):
     """PyTorch module combining the known and latent derivatives."""
     def __init__(self, growth_rates, latent_dynamics, dtype=torch.float32):
@@ -92,9 +62,37 @@ class HybridDynamics(nn.Module):
         return known_dx + latent_dx
 
 
-def rbf_activation(x):
-    """Radial basis function activation."""
-    return torch.exp(-x * x)
+def get_neural_dynamics(
+        num_hidden_neurons: list[int] | None = None, activation: str = 'tanh',
+        compile_model: bool = False) -> nn.Module:
+    """Return the neural dynamics for the Lotka-Volterra model.
+
+    Args:
+        num_hidden_neurons (list[int]): number of neurons in each hidden layer
+            of the latent dynamics. If None, then this will be set to [5, 5].
+            Default is None.
+        activation (str): activation function to use in the latent dynamics.
+            Can be either `rbf` for custom radial basis function, or any of the
+            activation functions in `torch.nn.functional`. Default is `tanh`.
+        compile (bool): whether to compile the model. Default is False.
+
+    Returns:
+        nn.Module: hybrid dynamics for the Lotka-Volterra model.
+    """
+    if activation == 'rbf':
+        activation_func = rbf_activation
+    else:
+        activation_func = getattr(nn.functional, activation)
+
+    if num_hidden_neurons is None:
+        num_hidden_neurons = [5, 5]
+
+    nerual_dynamics = NeuralDynamics(2, num_hidden_neurons, activation_func)
+
+    if compile_model:
+        nerual_dynamics = torch.compile(nerual_dynamics)
+
+    return nerual_dynamics
 
 
 def get_hybrid_dynamics(
@@ -125,7 +123,7 @@ def get_hybrid_dynamics(
 
     if num_hidden_neurons is None:
         num_hidden_neurons = [5, 5]
-    latent_dynamics = NeuralDynamics(num_hidden_neurons, activation_func)
+    latent_dynamics = NeuralDynamics(2, num_hidden_neurons, activation_func)
     hybrid_dynamics = HybridDynamics(growth_rates, latent_dynamics,
                                      dtype=dtype)
 

@@ -231,6 +231,11 @@ def get_args():
                             help='Data source for UDE model training')
     arg_parser.add_argument('--data_preprocessor', type=str, default='none',
                             help='Preprocessing method for training data')
+    arg_parser.add_argument('--ude_rhs', type=str, default='hybrid',
+                            choices=['nn', 'hybrid'],
+                            help='Form of the right-hand side of the ODE '
+                            'system, either nn (a single neural network) or '
+                            'hybrid (known dynamics + neural network)')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
@@ -267,8 +272,12 @@ def get_upper_bound_checker(upper_bound):
 
 def main():
     args = get_args()
-    matplotlib.use(args.matplotlib_backend)
     verbose = args.verbose
+    matplotlib.use(args.matplotlib_backend)
+    matplotlib.rcParams['font.family'] = 'sans-serif'
+    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    matplotlib.rcParams['ps.fonttype'] = 42
 
     # initialize model and data
     search_config = {}
@@ -322,10 +331,8 @@ def main():
     print(f'- Activation function: {args.activation}', flush=True)
     output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
     if data_preprocessor != 'none':
-        output_dir += data_preprocessor.replace('_', '-')
-        output_dir += '-ude-'
-    else:
-        output_dir += 'ude-'
+        output_dir += data_preprocessor.replace('_', '-') + '-'
+    output_dir += f'{args.ude_rhs}-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
@@ -354,28 +361,38 @@ def main():
     output_prefix = f'lr_{learning_rate:.3f}_window_size_{window_size:02d}'
     output_prefix += f'_batch_size_{batch_size:02d}'
     model_module = get_model_module(args.model)
-    match args.model:
-        case 'lotka_volterra':
-            growth_rates = np.array([params_true[0], -params_true[3]])
-            hybrid_dynamics = model_module.get_hybrid_dynamics(
-                growth_rates, args.num_hidden_neurons, args.activation)
+    if args.ude_rhs == 'nn':
+        neural_dynamics = model_module.get_neural_dynamics(
+            num_hidden_neurons=args.num_hidden_neurons,
+            activation=args.activation)
 
-            def recovered_dynamics(t, x, model):
-                return growth_rates * x + model.predict(x[np.newaxis, :])[0]
+        def recovered_dynamics(t, x, model):
+            return model.predict(x[np.newaxis, :])[0]
+    else:
+        match args.model:
+            case 'lotka_volterra':
+                growth_rates = np.array([params_true[0], -params_true[3]])
+                neural_dynamics = model_module.get_hybrid_dynamics(
+                    growth_rates,
+                    num_hidden_neurons=args.num_hidden_neurons,
+                    activation=args.activation)
 
-            search_config['recovered_dynamics'] = recovered_dynamics
-        case 'repressilator':
-            hybrid_dynamics = model_module.get_hybrid_dynamics(
-                args.num_hidden_neurons, args.activation)
+                def recovered_dynamics(t, x, model):
+                    return growth_rates * x + model.predict(
+                        x[np.newaxis, :])[0]
+            case 'repressilator':
+                neural_dynamics = model_module.get_hybrid_dynamics(
+                    num_hidden_neurons=args.num_hidden_neurons,
+                    activation=args.activation)
 
-            def recovered_dynamics(t, x, model):
-                return model.predict(x[np.newaxis, :])[0] - x
+                def recovered_dynamics(t, x, model):
+                    return model.predict(x[np.newaxis, :])[0] - x
 
-            search_config['recovered_dynamics'] = recovered_dynamics
+    search_config['recovered_dynamics'] = recovered_dynamics
     ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
                                        output_prefix)
     ts_learner.load_model(
-        hybrid_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
+        neural_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
     print('UDE model loaded', flush=True)
 
     # set up for SINDy model selection

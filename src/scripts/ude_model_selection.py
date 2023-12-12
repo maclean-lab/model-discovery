@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from torch import nn
 import h5py
+import matplotlib
 
 from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralTimeSeriesLearner
@@ -35,14 +36,18 @@ def get_args():
                             help='Source of training data')
     arg_parser.add_argument('--data_preprocessor', type=str, default='none',
                             help='Preprocessing method for training data')
+    arg_parser.add_argument('--ude_rhs', type=str, default='hybrid',
+                            choices=['nn', 'hybrid'],
+                            help='Form of the right-hand side of the ODE '
+                            'system, either nn (a single neural network) or '
+                            'hybrid (known dynamics + neural network)')
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
-                            'the latent network in the UDE model')
+                            'the neural network')
     arg_parser.add_argument('--activation', type=str, default='tanh',
                             choices=['tanh', 'relu', 'rbf'],
-                            help='Activation function for the latent network'
-                            ' in the UDE model')
+                            help='Activation function for the neural network')
     arg_parser.add_argument('--learning_rates', nargs='+', type=float,
                             default=[1e-3, 1e-2, 1e-1],
                             help='Learning rates to search over')
@@ -62,6 +67,8 @@ def get_args():
     arg_parser.add_argument('--torchode_step_method', type=str,
                             default='Dopri5', choices=['Dopri5', 'Tsit5'],
                             help='Step method to use for torchode')
+    arg_parser.add_argument('--matplotlib_backend', type=str, default='Agg',
+                            help='Matplotlib backend to use')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
 
@@ -71,6 +78,11 @@ def get_args():
 def main():
     args = get_args()
     verbose = args.verbose
+    matplotlib.use(args.matplotlib_backend)
+    matplotlib.rcParams['font.family'] = 'sans-serif'
+    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    matplotlib.rcParams['ps.fonttype'] = 42
 
     # load data
     model_module = get_model_module(args.model)
@@ -158,10 +170,8 @@ def main():
     print('Setting up training...', flush=True)
     output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
     if data_preprocessor != 'none':
-        output_dir += data_preprocessor.replace('_', '-')
-        output_dir += '-ude-'
-    else:
-        output_dir += 'ude-'
+        output_dir += data_preprocessor.replace('_', '-') + '-'
+    output_dir += f'{args.ude_rhs}-'
     output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
     output_dir += f'-{args.activation}'
     output_dir = os.path.join(
@@ -202,7 +212,7 @@ def main():
     # train for different combinations of hyperparameters
     for lr, ws, bs in itertools.product(learning_rates, window_sizes,
                                         batch_sizes):
-        print('Learning UDE with the following settings:', flush=True)
+        print('Learning data with the following settings:', flush=True)
         print(f'- Learning rate: {lr:.3f}', flush=True)
         print(f'- Window size: {ws}', flush=True)
         print(f'- Batch size: {bs}', flush=True)
@@ -210,20 +220,26 @@ def main():
         torch.manual_seed(seed)
 
         # train the model
-        match args.model:
-            case 'lotka_volterra':
-                growth_rates = np.array([params_true[0], -params_true[3]])
-                hybrid_dynamics = model_module.get_hybrid_dynamics(
-                    growth_rates, num_hidden_neurons=args.num_hidden_neurons,
-                    activation=args.activation)
-            case 'repressilator':
-                hybrid_dynamics = model_module.get_hybrid_dynamics(
-                    num_hidden_neurons=args.num_hidden_neurons,
-                    activation=args.activation)
+        if args.ude_rhs == 'nn':
+            neural_dynamics = model_module.get_neural_dynamics(
+                num_hidden_neurons=args.num_hidden_neurons,
+                activation=args.activation)
+        else:  # args.ude_rhs == 'hybrid'
+            match args.model:
+                case 'lotka_volterra':
+                    growth_rates = np.array([params_true[0], -params_true[3]])
+                    neural_dynamics = model_module.get_hybrid_dynamics(
+                        growth_rates,
+                        num_hidden_neurons=args.num_hidden_neurons,
+                        activation=args.activation)
+                case 'repressilator':
+                    neural_dynamics = model_module.get_hybrid_dynamics(
+                        num_hidden_neurons=args.num_hidden_neurons,
+                        activation=args.activation)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
         ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
                                            output_prefix)
-        ts_learner.train(hybrid_dynamics, loss_func, optimizer, lr, ws, bs,
+        ts_learner.train(neural_dynamics, loss_func, optimizer, lr, ws, bs,
                          num_epochs, integrator_backend=integrator_backend,
                          torchode_step_method=args.torchode_step_method,
                          valid_data=valid_samples,
@@ -250,11 +266,12 @@ def main():
 
             # evaluate the best model on training data
             best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
-            ts_learner.load_model(hybrid_dynamics, best_epoch_model_suffix)
+            ts_learner.load_model(neural_dynamics, best_epoch_model_suffix)
+            sub_modules = ['latent'] if args.ude_rhs == 'hybrid' else None
             ts_learner.eval(eval_data=train_samples,
                             integrator_backend='scipy',
                             integrator_kwargs={'method': 'LSODA'},
-                            sub_modules=['latent'], show_progress=False)
+                            sub_modules=sub_modules, show_progress=False)
             ts_learner.plot_pred_data()
             print('Saved plots of dynamics predicted by the best model',
                   flush=True)

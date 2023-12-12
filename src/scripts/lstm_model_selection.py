@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from torch import nn
 import h5py
+import matplotlib
 
 from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralTimeSeriesLearner
@@ -69,6 +70,8 @@ def get_args():
     arg_parser.add_argument('--num_epochs', type=int, default=10,
                             help='Number of epochs to train for each '
                             'combination of hyperparameters')
+    arg_parser.add_argument('--matplotlib_backend', type=str, default='Agg',
+                            help='Matplotlib backend to use')
     arg_parser.add_argument('--verbose', action='store_true',
                             help='Print output for training progress')
 
@@ -78,6 +81,11 @@ def get_args():
 def main():
     args = get_args()
     verbose = args.verbose
+    matplotlib.use(args.matplotlib_backend)
+    matplotlib.rcParams['font.family'] = 'sans-serif'
+    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    matplotlib.rcParams['ps.fonttype'] = 42
 
     # load data
     model_prefix = get_model_prefix(args.model)
@@ -158,7 +166,7 @@ def main():
     # train for different combinations of hyperparameters
     for lr, ws, bs in itertools.product(learning_rates, window_sizes,
                                         batch_sizes):
-        print('Learning UDE with the following settings:', flush=True)
+        print('Learning data with the following settings:', flush=True)
         print(f'- Learning rate: {lr:.3f}', flush=True)
         print(f'- Window size: {ws}', flush=True)
         print(f'- Batch size: {bs}', flush=True)

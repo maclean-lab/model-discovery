@@ -2,6 +2,8 @@ from abc import ABCMeta, abstractmethod
 from typing import Callable, Optional, Literal
 import numpy as np
 from scipy.integrate import solve_ivp
+import torch
+from torch import nn
 
 from time_series_data import TimeSeries
 
@@ -366,6 +368,43 @@ class DynamicalModel(metaclass=ABCMeta):
             ts_samples.append(TimeSeries(self._t, x_obs))
 
         return ts_samples
+
+
+class NeuralDynamics(nn.Module):
+    def __init__(self, num_vars: int, num_hidden_neurons: list[int],
+                 activation: Callable):
+        """Neural network for the latent derivatives.
+
+        Args:
+            num_neurons: number of neurons in each hidden layer.
+            activation: activation function to use between layers.
+        """
+        super().__init__()
+
+        self.activation = activation
+        self.module_list = nn.ModuleList()
+        # input layer
+        self.module_list.append(nn.Linear(num_vars, num_hidden_neurons[0]))
+        # hidden layers
+        for i in range(len(num_hidden_neurons) - 1):
+            self.module_list.append(
+                nn.Linear(num_hidden_neurons[i], num_hidden_neurons[i + 1]))
+        # output layer
+        self.module_list.append(nn.Linear(num_hidden_neurons[-1], num_vars))
+
+    def forward(self, t, x):
+        dx = self.module_list[0](x)
+
+        for module in self.module_list[1:]:
+            dx = self.activation(dx)
+            dx = module(dx)
+
+        return dx
+
+
+def rbf_activation(x):
+    """Radial basis function activation."""
+    return torch.exp(-x * x)
 
 
 class EcosystemModel(DynamicalModel):

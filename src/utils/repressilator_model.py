@@ -5,8 +5,7 @@ import torch
 from torch import nn
 
 from dynamical_models import DynamicalModel
-
-# TODO: share NeuralDynamics, rbf_activation with lotka_volterra_model.py
+from dynamical_models import NeuralDynamics, rbf_activation
 
 
 class RepressilatorModel(DynamicalModel):
@@ -48,37 +47,6 @@ class RepressilatorModel(DynamicalModel):
         return _f
 
 
-class NeuralDynamics(nn.Module):
-    def __init__(self, num_hidden_neurons: list[int], activation: Callable):
-        """Neural network for the latent derivatives.
-
-        Args:
-            num_neurons: number of neurons in each hidden layer.
-            activation: activation function to use between layers.
-        """
-        super().__init__()
-
-        self.activation = activation
-        self.module_list = nn.ModuleList()
-        # input layer
-        self.module_list.append(nn.Linear(3, num_hidden_neurons[0]))
-        # hidden layers
-        for i in range(len(num_hidden_neurons) - 1):
-            self.module_list.append(
-                nn.Linear(num_hidden_neurons[i], num_hidden_neurons[i + 1]))
-        # output layer
-        self.module_list.append(nn.Linear(num_hidden_neurons[-1], 3))
-
-    def forward(self, t, x):
-        dx = self.module_list[0](x)
-
-        for module in self.module_list[1:]:
-            dx = self.activation(dx)
-            dx = module(dx)
-
-        return dx
-
-
 class HybridDynamics(nn.Module):
     """PyTorch module combining the known and latent derivatives."""
     def __init__(self, latent_dynamics):
@@ -92,9 +60,36 @@ class HybridDynamics(nn.Module):
         return latent_dx - x
 
 
-def rbf_activation(x):
-    """Radial basis function activation."""
-    return torch.exp(-x * x)
+def get_neural_dynamics(
+        num_hidden_neurons: list[int] | None = None, activation: str = 'tanh',
+        compile_model: bool = False) -> nn.Module:
+    """Return the hybrid dynamics for the repressilator model.
+
+    Args:
+        num_hidden_neurons (list[int]): number of neurons in each hidden layer
+            of the latent dynamics. If None, then this will be set to [8, 8].
+            Default is None.
+        activation (str): activation function to use in the latent dynamics.
+            Can be either `rbf` for custom radial basis function, or any of the
+            activation functions in `torch.nn.functional`. Default is `tanh`.
+        compile (bool): whether to compile the model. Default is False.
+
+    Returns:
+        nn.Module: hybrid dynamics for the repressilator model.
+    """
+    if activation == 'rbf':
+        activation_func = rbf_activation
+    else:
+        activation_func = getattr(nn.functional, activation)
+
+    if num_hidden_neurons is None:
+        num_hidden_neurons = [8, 8]
+    neural_dynamics = NeuralDynamics(3, num_hidden_neurons, activation_func)
+
+    if compile_model:
+        neural_dynamics = torch.compile(neural_dynamics)
+
+    return neural_dynamics
 
 
 def get_hybrid_dynamics(
@@ -121,7 +116,7 @@ def get_hybrid_dynamics(
 
     if num_hidden_neurons is None:
         num_hidden_neurons = [8, 8]
-    latent_dynamics = NeuralDynamics(num_hidden_neurons, activation_func)
+    latent_dynamics = NeuralDynamics(3, num_hidden_neurons, activation_func)
     hybrid_dynamics = HybridDynamics(latent_dynamics)
 
     if compile_model:

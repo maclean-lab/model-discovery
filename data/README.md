@@ -19,3 +19,6 @@ Lotka-Volterra or `rep` for repressilator
     - `clean_x0`: noise added at all time points except the first
     - `clean_x0_lstm_{m}_{n}`: the above data denoised by LSTM which has
     `n` layers with `m` units
+
+### Note
+- LSTM-processed data may be removed later
