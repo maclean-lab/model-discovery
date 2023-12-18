@@ -163,7 +163,7 @@ def main():
     args = get_args()
     matplotlib.use(args.backend)
     matplotlib.rcParams['font.family'] = 'sans-serif'
-    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans']
     matplotlib.rcParams['pdf.fonttype'] = 42
     matplotlib.rcParams['ps.fonttype'] = 42
 

@@ -83,7 +83,7 @@ def main():
     verbose = args.verbose
     matplotlib.use(args.matplotlib_backend)
     matplotlib.rcParams['font.family'] = 'sans-serif'
-    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans']
     matplotlib.rcParams['pdf.fonttype'] = 42
     matplotlib.rcParams['ps.fonttype'] = 42
 

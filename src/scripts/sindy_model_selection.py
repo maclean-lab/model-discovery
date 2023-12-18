@@ -111,6 +111,7 @@ def get_latent_learning_config(model_name, sindy_config):
 
 
 def recover_from_data(args, search_config, verbose) -> bool:
+    print('Setting up SINDy learning directly from data...', flush=True)
     get_full_learning_config(args.model, search_config)
 
     def recovered_dynamics(t, x, model):
@@ -151,6 +152,8 @@ def recover_from_data(args, search_config, verbose) -> bool:
 
 
 def recover_from_ude(args, search_config, params_true, verbose) -> bool:
+    print('Setting up SINDy learning from UDE model...', flush=True)
+
     # load learned UDE model
     print('Loading UDE model with lowest validation loss...', flush=True)
     print('Network architecture:', flush=True)
@@ -525,7 +528,7 @@ def main():
     verbose = args.verbose
     matplotlib.use(args.matplotlib_backend)
     matplotlib.rcParams['font.family'] = 'sans-serif'
-    matplotlib.rcParams['font.sans-serif'] = ['Arial']
+    matplotlib.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans']
     matplotlib.rcParams['pdf.fonttype'] = 42
     matplotlib.rcParams['ps.fonttype'] = 42
 
