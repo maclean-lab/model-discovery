@@ -267,11 +267,10 @@ def main():
             # evaluate the best model on training data
             best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
             ts_learner.load_model(neural_dynamics, best_epoch_model_suffix)
-            sub_modules = ['latent'] if args.ude_rhs == 'hybrid' else None
             ts_learner.eval(eval_data=train_samples,
                             integrator_backend='scipy',
                             integrator_kwargs={'method': 'LSODA'},
-                            sub_modules=sub_modules, show_progress=False)
+                            show_progress=False)
             ts_learner.plot_pred_data()
             print('Saved plots of dynamics predicted by the best model',
                   flush=True)

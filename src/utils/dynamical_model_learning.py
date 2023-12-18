@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader as TorchDataLoader
 from torchdiffeq import odeint_adjoint as tdf_odeint
 import torchode
 import pysindy as ps
+from pysindy.feature_library.base import BaseFeatureLibrary
 from pysindy.feature_library import CustomLibrary
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -833,9 +834,9 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
         from `torchdiffeq` does not support batch input with different time
         points.
 
-        In addition to `pred_data`, this class also stores `sub_pred_data` for
-        outputs of selected sub-modules if specified when calling the `eval()`
-        method.
+        In addition to `pred_data`, this class also stores `module_pred_data`
+        for outputs of selected modules in the model if specified when calling
+        the `eval()` method.
 
         Args:
             train_data (list[TimeSeries]): time series data to be learned.
@@ -850,22 +851,22 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                          torch_dtype=torch_dtype, **kwargs)
 
         self._ode_integrator = None
-        self._sub_pred_data: dict[str, list[np.ndarray]] | None = None
+        self._module_pred_data: dict[str, list[np.ndarray]] | None = None
 
     @property
-    def sub_pred_data(self) -> dict[str, list[np.ndarray]] | None:
-        """dict[str, list[np.ndarray]] | None: outputs of sub-modules.
+    def module_pred_data(self) -> dict[str, list[np.ndarray]] | None:
+        """dict[str, list[np.ndarray]] | None: outputs of modules in the model.
 
-        If sub-modules are specified when calling the `eval()` method, this
-        property stores the outputs of the sub-modules as a dict mapping
-        sub-module name to data. Each data is a list of NumPy arrays. Each
-        array is the value predicted by the sub-module at all time points,
-        namely `pred_data.t`.
+        If modules are specified when calling the `eval()` method, this
+        property stores the outputs of the modules as a dict mapping module
+        name to data. In particular, `self` is mapped to the model itself.
+        Each data is a list of NumPy arrays. Each array is the value
+        predicted by the module at all time points, namely `pred_data.t`.
         """
-        if self._sub_pred_data is None:
+        if self._module_pred_data is None:
             return None
 
-        return self._sub_pred_data
+        return self._module_pred_data
 
     def train(self, model: nn.Module, loss_func: Callable,
               optimizer_type: type[torch.optim.Optimizer],
@@ -1025,7 +1026,7 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
              Literal['torchdiffeq', 'scipy'] = 'torchdiffeq',
              integrator_kwargs: dict | None = None,
              torchode_step_method: Literal['Dopri5', 'Tsit5'] = 'Dopri5',
-             sub_modules: str | list[str] | None = None,
+             eval_modules: str | list[str] | None = None,
              verbose: bool = False, show_progress=False, **kwargs) -> None:
         """Evaluate the learned model on some data.
 
@@ -1059,10 +1060,10 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             torchode_step_method (Literal['Dopri5', 'Tsit5']): type of ODE
                 integration method from `torchode`. Only used if
                 `integrator_backend` is `torchode`. Default is `Dopri5`.
-            sub_modules (str | list[str] | None): name(s) of sub-modules to
-                be evaluated in addition to the main module. Outputs from sub-
-                modules are stored in `sub_pred_data`, a dict mapping sub-
-                module name to data. Default is `None`.
+            eval_modules (str | list[str] | None): name(s) of modules to be
+                evaluated. Outputs from modules are stored in
+                `module_pred_data`, a dict mapping module name to data (see
+                `module_pred_data` property for details).  Default is `None`.
             verbose (bool): whether to print additional information. Default is
                 `False`.
             show_progress (bool): whether to show a progress bar for
@@ -1081,12 +1082,12 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
 
         self._eval_data = eval_data
         self._pred_data = []
-        self._sub_pred_data = {}
-        if sub_modules is not None:
-            if isinstance(sub_modules, str):
-                sub_modules = list(sub_modules)
+        self._module_pred_data = {}
+        if eval_modules is not None:
+            if isinstance(eval_modules, str):
+                eval_modules = [eval_modules]
 
-            self._sub_pred_data = {m: [] for m in sub_modules}
+            self._module_pred_data = {m: [] for m in eval_modules}
 
         if ref_data is None:
             ref_data = eval_data
@@ -1103,9 +1104,9 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
             self._eval(dataloader, self._pred_data,
                        integrator_backend=integrator_backend,
                        integrator_kwargs=integrator_kwargs,
-                       sub_modules=sub_modules,
-                       sub_pred_data=self._sub_pred_data, verbose=verbose,
-                       show_progress=show_progress)
+                       eval_modules=eval_modules,
+                       module_pred_data=self._module_pred_data,
+                       verbose=verbose, show_progress=show_progress)
 
         self._is_evaluated = True
         self._eval_metrics.update(self._get_mse(self._pred_data, ref_data))
@@ -1118,8 +1119,8 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
               integrator_backend:
               Literal['scipy', 'torchdiffeq', 'torchode'] = 'torchdiffeq',
               integrator_kwargs: dict | None = None,
-              sub_modules: str | list[str] | None = None,
-              sub_pred_data: dict[str, list[np.ndarray]] | None = None,
+              eval_modules: str | list[str] | None = None,
+              module_pred_data: dict[str, list[np.ndarray]] | None = None,
               verbose: bool = False, show_progress: bool = False, **kwargs
               ) -> None:
         """ Core method for evaluating the learned dynamics.
@@ -1132,21 +1133,22 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                 backend of ODE integrator. Default is `scipy`.
             integrator_kwargs (dict | None): additional keyword arguments for
                 ODE integrator. `t_eval` is ignored. Default is `None`.
-            sub_modules (str | list[str] | None): name(s) of sub-modules to
-                be evaluated in addition to the main module. Outputs from sub-
-                modules are stored in `sub_pred_data`, a dict mapping sub-
-                module name to data. Default is `None`.
-            sub_pred_data (dict[str, list[np.ndarray]] | None): dict to store
-                outputs of sub-modules. Default is `None`.
+            eval_modules (str | list[str] | None): name(s) of modules to be
+                evaluated. Outputs from modules are stored in
+                `module_pred_data`, a dict mapping module name to data
+                (see `module_pred_data` property for details).  Default is
+                `None`.
+            module_pred_data (dict[str, list[np.ndarray]] | None): dict to
+                store outputs of modules. Default is `None`.
             verbose (bool): whether to print additional information. Default is
                 `False`.
             show_progress (bool): whether to show a progress bar for
                 evaluation. Default is `False`.
             **kwargs: additional keyword arguments. Not used here.
         """
-        if sub_modules is not None and sub_pred_data is None:
-            raise ValueError('sub_pred_data must be provided if sub_modules'
-                             ' is provided')
+        if eval_modules is not None and module_pred_data is None:
+            raise ValueError('module_pred_data must be provided if '
+                             'eval_modules is provided')
 
         if integrator_kwargs is None:
             integrator_kwargs = {}
@@ -1194,12 +1196,15 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                     else:
                         pred_data.append(None)
 
-            # compute results for sub-modules
-            if is_integrator_successful and sub_modules is not None:
-                for module_name in sub_modules:
-                    module = getattr(self._model, module_name)
+            # compute results for modules
+            if is_integrator_successful and eval_modules is not None:
+                for module_name in eval_modules:
+                    if module_name == 'self':
+                        module = self._model
+                    else:
+                        module = getattr(self._model, module_name)
                     module_pred = module(t, x_pred).numpy()
-                    sub_pred_data[module_name].append(module_pred)
+                    module_pred_data[module_name].append(module_pred)
 
 
 def mask_array_to_bin(mask: Iterable) -> int:
@@ -1240,8 +1245,8 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
     def train(self, *args, backend: Literal['pysindy', 'custom'] = 'pysindy',
               optimizer_type: Any | None = None, threshold: float = 0.1,
               learn_dx: bool = False, normalize_columns: bool = False,
-              basis_funcs: list[Callable] | None = None,
-              basis_names: list[Callable] | None = None,
+              basis_funcs: list[Callable] | BaseFeatureLibrary | None = None,
+              basis_exprs: list[Callable] | None = None,
               optimizer_kwargs: dict[str, Any] | None = None,
               valid_data: list[TimeSeries] | None = None,
               valid_kwargs: dict[str, Any] | None = None,
@@ -1264,12 +1269,13 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
             normalize_columns (bool): whether to normalize each column of
                 Theta(X), where Theta is the library of basis functions and X
                 is the time series data. Default is False.
-            basis_funcs (list[Callable] | None): list of basis functions to
-                use. Default is None, which uses the default basis functions
-                determined by the backend.
-            basis_names (list[Callable] | None): list of names for basis
-                functions. Default is None, which uses the default basis names
-                determined by the backend.
+            basis_funcs (list[Callable] | None): list of basis functions or
+                PySINDy basis library. Default is None, which uses the default
+                basis functions determined by the backend.
+            basis_exprs (list[Callable] | None): list of functions for
+                generating expressions for basis functions (e.g.
+                `lambda x: f'{x}^2'` for quadratic function). Default is None,
+                which uses the default basis names determined by the backend.
             optimizer_kwargs (dict[str, Any] | None): additional keyword
                 arguments for the optimizer. Default is None.
             valid_data (list[TimeSeries] | None): validation data. If set to
@@ -1297,8 +1303,10 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
             verbose=verbose, **optimizer_kwargs)
         if basis_funcs is None:
             basis_lib = None
-        else:
-            basis_lib = CustomLibrary(basis_funcs, basis_names)
+        elif isinstance(basis_funcs, BaseFeatureLibrary):
+            basis_lib = basis_funcs
+        else:  # basis_funcs is a list of basis functions
+            basis_lib = CustomLibrary(basis_funcs, basis_exprs)
         self._model = ps.SINDy(optimizer=optimizer, feature_library=basis_lib)
 
         # transform training data

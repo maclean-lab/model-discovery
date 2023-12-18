@@ -108,12 +108,12 @@ x0_train = [ts.x[0, :] for ts in datasets['train']]
 ude_learner.eval(t_eval=t_train, x0_eval=x0_train, ref_data=datasets['train'],
                  integrator_backend='scipy',
                  integrator_kwargs={'method': 'LSODA'},
-                 sub_modules=['latent'], verbose=True, show_progress=True)
+                 eval_modules=['latent'], verbose=True, show_progress=True)
 ude_learner.plot_pred_data(ref_data=datasets['train'])
 
 ude_pred_data = []
 for ts, dx_pred in zip(ude_learner.pred_data,
-                       ude_learner.sub_pred_data['latent']):
+                       ude_learner.module_pred_data['latent']):
     ts.copy()
     ts.dx = dx_pred
     ts = ts[np.where((ts.t >= 0.5) & (ts.t <= 3.5))[0]]

@@ -6,26 +6,224 @@ from argparse import ArgumentParser
 import numpy as np
 from numpy.random import default_rng
 import pandas as pd
-from pysindy import STLSQ
+from pysindy import STLSQ, PolynomialLibrary
 import h5py
 import matplotlib
 
 from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from dynamical_model_learning import OdeSystemLearner
-from model_helpers import get_model_module, get_model_prefix, get_sindy_config
-from model_helpers import print_hrule
+from model_helpers import get_model_module, get_model_prefix, print_hrule
 
 
-def search_time_steps(search_config, verbose=False):
+def get_full_learning_config(model_name, sindy_config):
+    match model_name:
+        case 'lotka_volterra':
+            sindy_config['stlsq_threshold'] = 0.1
+            sindy_config['t_ude_steps'] = [0.1, 0.05]
+            sindy_config['basis_funcs'] = {
+                'default': PolynomialLibrary(degree=2),
+                'higher_order': [
+                    lambda x: x ** 2, lambda x, y: x * y, lambda x: x ** 3,
+                    lambda x, y: x * x * y, lambda x, y: x * y * y
+                ]}
+            sindy_config['basis_exprs'] = {
+                'default': None,
+                'higher_order': [
+                    lambda x: f'{x}^2', lambda x, y: f'{x} {y}',
+                    lambda x: f'{x}^3', lambda x, y: f'{x}^2 {y}',
+                    lambda x, y: f'{x} {y}^2'
+                ]
+            }
+        case 'repressilator':
+            sindy_config['stlsq_threshold'] = 1.0
+            sindy_config['t_ude_steps'] = [0.2, 0.1]
+            sindy_config['basis_funcs'] = {
+                'hill_1': [lambda x: 1.0 / (1.0 + x)],
+                'hill_2': [lambda x: 1.0 / (1.0 + x ** 2)],
+                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)],
+                'hill_4': [lambda x: 1.0 / (1.0 + x ** 4)],
+                'hill_max_3': [lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3)],
+                'hill_max_4': [lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3),
+                               lambda x: 1.0 / (1.0 + x ** 4)]
+            }
+            sindy_config['basis_exprs'] = {
+                'hill_1': [lambda x: f'/(1+{x})'],
+                'hill_2': [lambda x: f'/(1+{x}^2)'],
+                'hill_3': [lambda x: f'/(1+{x}^3)'],
+                'hill_4': [lambda x: f'/(1+{x}^4)'],
+                'hill_max_3': [lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)'],
+                'hill_max_4': [lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)',
+                               lambda x: f'/(1+{x}^4)']
+            }
+
+
+def get_latent_learning_config(model_name, sindy_config):
+    match model_name:
+        case 'lotka_volterra':
+            sindy_config['stlsq_threshold'] = 0.1
+            sindy_config['t_ude_steps'] = [0.1, 0.05]
+            sindy_config['basis_funcs'] = {
+                'default': PolynomialLibrary(degree=2),
+                'higher_order': PolynomialLibrary(degree=3)
+            }
+            sindy_config['basis_exprs'] = {
+                'default': None,
+                'higher_order': None
+            }
+        case 'repressilator':
+            sindy_config['stlsq_threshold'] = 1.0
+            sindy_config['t_ude_steps'] = [0.2, 0.1]
+            sindy_config['basis_funcs'] = {
+                'hill_1': [lambda x: x, lambda x: 1.0 / (1.0 + x)],
+                'hill_2': [lambda x: x, lambda x: 1.0 / (1.0 + x ** 2)],
+                'hill_3': [lambda x: x, lambda x: 1.0 / (1.0 + x ** 3)],
+                'hill_4': [lambda x: x, lambda x: 1.0 / (1.0 + x ** 4)],
+                'hill_max_3': [lambda x: x,
+                               lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3)],
+                'hill_max_4': [lambda x: x,
+                               lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3),
+                               lambda x: 1.0 / (1.0 + x ** 4)]
+            }
+            sindy_config['basis_exprs'] = {
+                'hill_1': [lambda x: f'{x}', lambda x: f'/(1+{x})'],
+                'hill_2': [lambda x: f'{x}', lambda x: f'/(1+{x}^2)'],
+                'hill_3': [lambda x: f'{x}', lambda x: f'/(1+{x}^3)'],
+                'hill_4': [lambda x: f'{x}', lambda x: f'/(1+{x}^4)'],
+                'hill_max_3': [lambda x: f'{x}',
+                               lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)'],
+                'hill_max_4': [lambda x: f'{x}',
+                               lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)',
+                               lambda x: f'/(1+{x}^4)']
+            }
+
+
+def recover_from_ude(args, search_config, params_true, verbose):
+    # load learned UDE model
+    print('Loading UDE model with lowest validation loss...', flush=True)
+    print('Network architecture:', flush=True)
+    print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
+    print(f'- Activation function: {args.activation}', flush=True)
+    model_prefix = get_model_prefix(args.model)
+    noise_type = args.noise_type
+    noise_level = args.noise_level
+    data_source = args.data_source
+    seed = args.seed
+    project_root = get_project_root()
+    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
+    output_dir += f'{args.ude_rhs}-'
+    output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
+    output_dir += f'-{args.activation}'
+    output_dir = os.path.join(
+        project_root, 'outputs', output_dir,
+        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
+        f'-ude-model-selection')
+
+    if not os.path.exists(output_dir):
+        print('No UDE model found for the given architecture', flush=True)
+        print('Terminating...', flush=True)
+
+        return
+
+    # TODO: if specified, preprocess by LSTM
+    ude_train_samples = search_config['train_samples']
+
+    # get the UDE model with lowest validation loss
+    ude_model_metric = pd.read_csv(
+        os.path.join(output_dir, 'ude_model_metrics.csv'), index_col=False)
+    if len(ude_model_metric) == 0:
+        print('No UDE model was successfully trained; will not train SINDy'
+              ' models', flush=True)
+        return
+    best_ude_row = ude_model_metric['best_valid_loss'].idxmin()
+    learning_rate = ude_model_metric.loc[best_ude_row, 'learning_rate']
+    window_size = ude_model_metric.loc[best_ude_row, 'window_size']
+    batch_size = ude_model_metric.loc[best_ude_row, 'batch_size']
+    best_epoch = ude_model_metric.loc[best_ude_row, 'best_epoch']
+    output_prefix = f'lr_{learning_rate:.3f}_window_size_{window_size:02d}'
+    output_prefix += f'_batch_size_{batch_size:02d}'
+    model_module = get_model_module(args.model)
+    if args.ude_rhs == 'nn':
+        get_full_learning_config(args.model, search_config)
+        neural_dynamics = model_module.get_neural_dynamics(
+            num_hidden_neurons=args.num_hidden_neurons,
+            activation=args.activation)
+
+        def recovered_dynamics(t, x, model):
+            return model.predict(x[np.newaxis, :])[0]
+    else:
+        get_latent_learning_config(args.model, search_config)
+
+        match args.model:
+            case 'lotka_volterra':
+                growth_rates = np.array([params_true[0], -params_true[3]])
+                neural_dynamics = model_module.get_hybrid_dynamics(
+                    growth_rates, num_hidden_neurons=args.num_hidden_neurons,
+                    activation=args.activation)
+
+                def recovered_dynamics(t, x, model):
+                    return growth_rates * x + model.predict(
+                        x[np.newaxis, :])[0]
+            case 'repressilator':
+                neural_dynamics = model_module.get_hybrid_dynamics(
+                    num_hidden_neurons=args.num_hidden_neurons,
+                    activation=args.activation)
+
+                def recovered_dynamics(t, x, model):
+                    return model.predict(x[np.newaxis, :])[0] - x
+
+    search_config['ude_rhs'] = args.ude_rhs
+    search_config['recovered_dynamics'] = recovered_dynamics
+    ude_learner = NeuralDynamicsLearner(
+        search_config['train_samples'], output_dir, output_prefix)
+    ude_learner.load_model(
+        neural_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
+    print('UDE model loaded', flush=True)
+
+    # set up for SINDy model selection
+    output_dir = os.path.join(
+        os.path.split(output_dir)[0],
+        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
+        '-sindy-model-selection')
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    search_config['output_dir'] = output_dir
+    ude_learner.output_dir = output_dir
+    search_config['ude_learner'] = ude_learner
+
+    print('SINDy model selection setup finished', flush=True)
+    t_span_str = ', '.join(str(t) for t in search_config['t_sindy_span'])
+    print(f'Time span for SINDy training: ({t_span_str})', flush=True)
+    print_hrule()
+
+    search_time_steps(search_config, ude_train_samples, verbose=verbose)
+
+
+def search_time_steps(search_config, ude_train_samples, verbose=False):
     t_sindy_span = search_config['t_sindy_span']
-    ts_learner = search_config['ts_learner']
+    ude_learner = search_config['ude_learner']
     train_samples = search_config['train_samples']
-    ude_train_samples = search_config['ude_train_samples']
     num_train_samples = len(ude_train_samples)
 
     # evaluate on UDE training time span
-    # TODO: if specified, preprocess by LSTM
     for t_step in search_config['t_ude_steps']:
         print(f'Generating UDE dynamics on t_step {t_step:.03f} for SINDy '
               'training...', flush=True)
@@ -44,17 +242,21 @@ def search_time_steps(search_config, verbose=False):
                 x0_noise_scale = np.clip(x0_noise_scale, -0.01, 0.01)
                 x0_train.append(x0_base * (1 + x0_noise_scale))
 
-        ts_learner.output_prefix = f't_step_{t_step:.2f}_ude'
-        ts_learner.eval(t_eval=t_train, x0_eval=x0_train,
-                        ref_data=train_samples, integrator_backend='scipy',
-                        integrator_kwargs={'method': 'LSODA'},
-                        sub_modules=['latent'], verbose=verbose,
-                        show_progress=False)
-        ts_learner.plot_pred_data(ref_data=train_samples)
+        ude_learner.output_prefix = f't_step_{t_step:.2f}_ude'
+        if search_config['ude_rhs'] == 'hybrid':
+            eval_modules = 'latent'
+        else:  # search_config['ude_rhs'] == 'nn'
+            eval_modules = 'self'
+        ude_learner.eval(t_eval=t_train, x0_eval=x0_train,
+                         ref_data=train_samples, integrator_backend='scipy',
+                         integrator_kwargs={'method': 'LSODA'},
+                         eval_modules=eval_modules, verbose=verbose,
+                         show_progress=False)
+        ude_learner.plot_pred_data(ref_data=train_samples)
 
         sindy_train_samples = []
-        for ts, dx_pred in zip(ts_learner.pred_data,
-                               ts_learner.sub_pred_data['latent']):
+        for ts, dx_pred in zip(ude_learner.pred_data,
+                               ude_learner.module_pred_data[eval_modules]):
             ts = ts.copy()
             ts.dx = dx_pred
 
@@ -68,7 +270,7 @@ def search_time_steps(search_config, verbose=False):
 
             sindy_train_samples.append(ts)
 
-        print('UDE dynamics generated')
+        print('SINDy training samples generated from neural dynamics')
         print_hrule()
 
         search_basis(search_config, sindy_train_samples, {'t_step': t_step},
@@ -77,9 +279,9 @@ def search_time_steps(search_config, verbose=False):
 
 def search_basis(search_config, sindy_train_samples, model_info,
                  verbose=False):
-    for basis_name in search_config['basis_libs']:
+    for basis_type in search_config['basis_funcs']:
         model_info_new = model_info.copy()
-        model_info_new['basis'] = basis_name
+        model_info_new['basis'] = basis_type
 
         search_basis_normalization(search_config, sindy_train_samples,
                                    model_info_new, verbose=verbose)
@@ -125,8 +327,8 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
     # unpack search config
     output_dir = search_config['output_dir']
     sindy_optimizers = search_config['sindy_optimizers']
-    basis_libs = search_config['basis_libs']
-    basis_strs = search_config['basis_strs']
+    basis_funcs = search_config['basis_funcs']
+    basis_exprs = search_config['basis_exprs']
     valid_samples = search_config['valid_samples']
     test_samples = search_config['test_samples']
     recovered_dynamics = search_config['recovered_dynamics']
@@ -175,8 +377,8 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
     eq_learner.train(optimizer_type=sindy_optimizers[optimizer_name],
                      threshold=search_config['stlsq_threshold'],
                      learn_dx=True, normalize_columns=normalize_columns,
-                     basis_funcs=basis_libs[basis],
-                     basis_names=basis_strs[basis],
+                     basis_funcs=basis_funcs[basis],
+                     basis_exprs=basis_exprs[basis],
                      optimizer_kwargs=optimizer_args, valid_data=valid_samples,
                      valid_kwargs=valid_kwargs, verbose=verbose)
     print('SINDy learning finished', flush=True)
@@ -239,11 +441,10 @@ def get_args():
     arg_parser.add_argument('--num_hidden_neurons', nargs='+', type=int,
                             default=[5, 5],
                             help='Number of neurons in each hidden layer of '
-                            'the latent network in the UDE model')
+                            'the neural network')
     arg_parser.add_argument('--activation', type=str, default='tanh',
                             choices=['tanh', 'relu', 'rbf'],
-                            help='Activation function for the latent network'
-                            ' in the UDE model')
+                            help='Activation function for the neural network')
     arg_parser.add_argument('--t_sindy_span', nargs=2, type=float,
                             default=[-np.inf, np.inf], metavar=('T0', 'T_END'),
                             help='Time span of SINDy training data')
@@ -270,6 +471,11 @@ def get_upper_bound_checker(upper_bound):
     return check_upper_bound
 
 
+def get_project_root():
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', '..'))
+
+
 def main():
     args = get_args()
     verbose = args.verbose
@@ -285,28 +491,23 @@ def main():
     noise_level = args.noise_level
     seed = args.seed
     print('Loading data...', flush=True)
-    project_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '..', '..'))
+    project_root = get_project_root()
     model_prefix = get_model_prefix(args.model)
     data_source = args.data_source
-    data_preprocessor = args.data_preprocessor
     data_path = os.path.join(
         project_root, 'data',
         f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
         f'_seed_{seed:04d}_{data_source}.h5')
     data_fd = h5py.File(data_path, 'r')
-    params_true = data_fd.attrs['param_values']
+    if 'param_values' in data_fd.attrs:
+        params_true = data_fd.attrs['param_values']
+    else:
+        params_true = None
     t_train_span = data_fd['train'].attrs['t_span']
     train_samples = load_dataset_from_h5(data_fd, 'train')
     valid_samples = load_dataset_from_h5(data_fd, 'valid')
     test_samples = load_dataset_from_h5(data_fd, 'test')
     data_fd.close()
-
-    # TODO: preprocess data with LSTM
-    if 'lstm' in data_preprocessor:
-        pass
-    else:
-        search_config['ude_train_samples'] = train_samples
 
     print('Data loaded:', flush=True)
     print(f'- Model: {args.model}', flush=True)
@@ -324,90 +525,9 @@ def main():
 
     print_hrule()
 
-    # load learned UDE model
-    print('Loading UDE model with lowest validation loss...', flush=True)
-    print('Network architecture:', flush=True)
-    print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
-    print(f'- Activation function: {args.activation}', flush=True)
-    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
-    if data_preprocessor != 'none':
-        output_dir += data_preprocessor.replace('_', '-') + '-'
-    output_dir += f'{args.ude_rhs}-'
-    output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
-    output_dir += f'-{args.activation}'
-    output_dir = os.path.join(
-        project_root, 'outputs', output_dir,
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        f'-ude-model-selection')
-
-    if not os.path.exists(output_dir):
-        print('No UDE model found for the given architecture', flush=True)
-        print('Terminating...', flush=True)
-
-        return
-
-    # get the UDE model with lowest validation loss
-    ude_model_metric = pd.read_csv(
-        os.path.join(output_dir, 'ude_model_metrics.csv'), index_col=False)
-    if len(ude_model_metric) == 0:
-        print('No UDE model was successfully trained; will not train SINDy'
-              ' models', flush=True)
-        return
-    best_ude_row = ude_model_metric['best_valid_loss'].idxmin()
-    learning_rate = ude_model_metric.loc[best_ude_row, 'learning_rate']
-    window_size = ude_model_metric.loc[best_ude_row, 'window_size']
-    batch_size = ude_model_metric.loc[best_ude_row, 'batch_size']
-    best_epoch = ude_model_metric.loc[best_ude_row, 'best_epoch']
-    output_prefix = f'lr_{learning_rate:.3f}_window_size_{window_size:02d}'
-    output_prefix += f'_batch_size_{batch_size:02d}'
-    model_module = get_model_module(args.model)
-    if args.ude_rhs == 'nn':
-        neural_dynamics = model_module.get_neural_dynamics(
-            num_hidden_neurons=args.num_hidden_neurons,
-            activation=args.activation)
-
-        def recovered_dynamics(t, x, model):
-            return model.predict(x[np.newaxis, :])[0]
-    else:
-        match args.model:
-            case 'lotka_volterra':
-                growth_rates = np.array([params_true[0], -params_true[3]])
-                neural_dynamics = model_module.get_hybrid_dynamics(
-                    growth_rates,
-                    num_hidden_neurons=args.num_hidden_neurons,
-                    activation=args.activation)
-
-                def recovered_dynamics(t, x, model):
-                    return growth_rates * x + model.predict(
-                        x[np.newaxis, :])[0]
-            case 'repressilator':
-                neural_dynamics = model_module.get_hybrid_dynamics(
-                    num_hidden_neurons=args.num_hidden_neurons,
-                    activation=args.activation)
-
-                def recovered_dynamics(t, x, model):
-                    return model.predict(x[np.newaxis, :])[0] - x
-
-    search_config['recovered_dynamics'] = recovered_dynamics
-    ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
-                                       output_prefix)
-    ts_learner.load_model(
-        neural_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}')
-    print('UDE model loaded', flush=True)
-
-    # set up for SINDy model selection
-    output_dir = os.path.join(
-        os.path.split(output_dir)[0],
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        '-sindy-model-selection')
-
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    ts_learner.output_dir = output_dir
+    # set up model selection
     search_config['noise_type'] = noise_type
     search_config['noise_level'] = noise_level
-    search_config['output_dir'] = output_dir
     search_config['t_train_span'] = t_train_span
     t_sindy_span = args.t_sindy_span
     if t_sindy_span[0] < t_train_span[0]:
@@ -415,7 +535,6 @@ def main():
     if t_sindy_span[1] > t_train_span[1]:
         t_sindy_span[1] = t_train_span[1]
     search_config['t_sindy_span'] = tuple(t_sindy_span)
-    search_config['ts_learner'] = ts_learner
     search_config['train_samples'] = train_samples
     search_config['valid_samples'] = valid_samples
     search_config['test_samples'] = test_samples
@@ -423,9 +542,10 @@ def main():
     search_config['sindy_optimizer_args'] = {
         'stlsq': {'alpha': [0.05, 0.1, 0.5, 1.0, 5.0, 10.0]}}
     search_config['rng'] = default_rng(seed)
-
-    # model specific setup
-    get_sindy_config(args.model, search_config)
+    search_config['stop_events'] = [get_lower_bound_checker(-10.0),
+                                    get_upper_bound_checker(20.0)]
+    for event in search_config['stop_events']:
+        event.terminal = True
 
     # initialize table for model metrics
     num_variables = train_samples[0].x.shape[1]
@@ -439,21 +559,12 @@ def main():
     model_metric_columns.append('recovered_eqs')
     search_config['model_metrics'] = pd.DataFrame(columns=model_metric_columns)
 
-    search_config['stop_events'] = [get_lower_bound_checker(-10.0),
-                                    get_upper_bound_checker(20.0)]
-    for event in search_config['stop_events']:
-        event.terminal = True
-
-    print('SINDy model selection setup finished', flush=True)
-    t_span_str = ', '.join(str(t) for t in search_config['t_sindy_span'])
-    print(f'Time span for SINDy training: ({t_span_str})', flush=True)
-    print_hrule()
-
-    search_time_steps(search_config, verbose=verbose)
-    print('Search completed', flush=True)
+    recover_from_ude(args, search_config, params_true, verbose)
+    print('SINDy model selection completed', flush=True)
 
     search_config['model_metrics'].to_csv(
-        os.path.join(output_dir, 'sindy_model_metrics.csv'), index=False)
+        os.path.join(search_config['output_dir'], 'sindy_model_metrics.csv'),
+        index=False)
     print('Model metrics saved.', flush=True)
 
 
