@@ -13,7 +13,8 @@ from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralTimeSeriesLearner
 from dynamical_model_learning import NeuralDynamicsLearner
 from lstm_model_selection import LstmDynamics
-from model_helpers import get_model_module, get_model_prefix, print_hrule
+from model_helpers import get_model_module, get_data_path, \
+    get_model_selection_dir, print_hrule
 
 
 def get_args():
@@ -85,20 +86,14 @@ def main():
     matplotlib.rcParams['ps.fonttype'] = 42
 
     # load data
-    model_module = get_model_module(args.model)
-    model_prefix = get_model_prefix(args.model)
     noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
     data_source = args.data_source
     data_preprocessor = args.data_preprocessor
     print('Loading data...', flush=True)
-    project_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '..', '..'))
-    data_path = os.path.join(
-        project_root, 'data',
-        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_{data_source}.h5')
+    data_path = get_data_path(args.model, noise_type, noise_level, seed,
+                              data_source)
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_train_span = data_fd['train'].attrs['t_span']
@@ -110,13 +105,11 @@ def main():
     # use learned LSTM model to preprocess training and validation data
     if data_preprocessor.startswith('lstm_'):
         # retrieve information about the best LSTM model
-        lstm_output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
-        lstm_output_dir += data_preprocessor.replace('_', '-')
-        lstm_output_dir = os.path.join(
-            project_root, 'outputs', lstm_output_dir,
-            f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}')
-        num_hidden_features = data_preprocessor.split('_')[1]
-        num_layers = data_preprocessor.split('_')[2]
+        lstm_config = {'num_hidden_features': data_preprocessor.split('_')[1],
+                       'num_layers': data_preprocessor.split('_')[2]}
+        lstm_output_dir = get_model_selection_dir(
+            args.model, noise_type, noise_level, seed, data_source, 'lstm',
+            'lstm', nn_config=lstm_config)
         lstm_metrics_path = os.path.join(
             lstm_output_dir, 'lstm_model_metrics.csv')
         lstm_model_metrics = pd.read_csv(lstm_metrics_path, index_col=False)
@@ -138,8 +131,9 @@ def main():
         input_mask[window_size // 2] = False
         ts_learner = NeuralTimeSeriesLearner(train_samples, lstm_output_dir,
                                              output_prefix)
-        lstm_dynamics = LstmDynamics(num_vars, window_size,
-                                     num_hidden_features, num_layers)
+        lstm_dynamics = LstmDynamics(
+            num_vars, window_size, lstm_config['num_hidden_features'],
+            lstm_config['num_layers'])
         ts_learner.load_model(
             lstm_dynamics, output_suffix=f'model_state_epoch_{best_epoch:03d}',
             input_mask=input_mask)
@@ -168,21 +162,21 @@ def main():
 
     # set up for output files
     print('Setting up training...', flush=True)
-    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
-    if data_preprocessor != 'none':
-        output_dir += data_preprocessor.replace('_', '-') + '-'
-    output_dir += f'{args.ude_rhs}-'
-    output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
-    output_dir += f'-{args.activation}'
-    output_dir = os.path.join(
-        project_root, 'outputs', output_dir,
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        '-ude-model-selection')
+    if data_preprocessor == 'none':
+        pipeline = 'ude'
+    else:
+        pipeline = f'{data_preprocessor.replace("_", "-")}-ude'
+    nn_config = {'num_hidden_neurons': args.num_hidden_neurons,
+                 'activation': args.activation}
+    output_dir = get_model_selection_dir(
+        args.model, noise_type, noise_level, seed, data_source, pipeline,
+        'ude', ude_rhs=args.ude_rhs, nn_config=nn_config)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     # set up for training
+    model_module = get_model_module(args.model)
     loss_func = nn.MSELoss()
     optimizer = torch.optim.Adam
     learning_rates = args.learning_rates

@@ -11,7 +11,8 @@ import matplotlib
 
 from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralTimeSeriesLearner
-from model_helpers import get_model_prefix, print_hrule
+from model_helpers import get_data_path, get_model_selection_dir, \
+    print_hrule
 
 
 class LstmDynamics(nn.Module):
@@ -88,18 +89,13 @@ def main():
     matplotlib.rcParams['ps.fonttype'] = 42
 
     # load data
-    model_prefix = get_model_prefix(args.model)
     noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
     data_source = args.data_source
     print('Loading data...', flush=True)
-    project_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '..', '..'))
-    data_path = os.path.join(
-        project_root, 'data',
-        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_{data_source}.h5')
+    data_path = get_data_path(args.model, noise_type, noise_level, seed,
+                              data_source)
     data_fd = h5py.File(data_path, 'r')
     params_true = data_fd.attrs['param_values']
     t_spans = {}
@@ -128,12 +124,11 @@ def main():
 
     # set up for output files
     print('Setting up training...', flush=True)
-    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-lstm'
-    output_dir += f'-{args.num_hidden_features}-{args.num_layers}'
-    output_dir = os.path.join(
-        project_root, 'outputs', output_dir,
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        '-model-selection')
+    lstm_config = {'num_hidden_features': args.num_hidden_features,
+                   'num_layers': args.num_layers}
+    output_dir = get_model_selection_dir(
+        args.model, noise_type, noise_level, seed, data_source, 'lstm',
+        'lstm', nn_config=lstm_config)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

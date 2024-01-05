@@ -330,7 +330,7 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
                 plt.ylabel(y_label)
                 plt.legend()
 
-                pdf.savefig()
+                pdf.savefig(transparent=True)
                 plt.close()
 
 

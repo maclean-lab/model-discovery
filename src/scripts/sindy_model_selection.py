@@ -13,20 +13,21 @@ import matplotlib
 from time_series_data import load_dataset_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from dynamical_model_learning import OdeSystemLearner
-from model_helpers import get_model_module, get_model_prefix, print_hrule
+from model_helpers import get_model_module, get_data_path, \
+    get_model_selection_dir, print_hrule
 
 
-def get_full_learning_config(model_name, sindy_config):
+def get_full_learning_config(model_name, search_config):
     match model_name:
         case 'lotka_volterra':
-            sindy_config['stlsq_threshold'] = 0.1
-            sindy_config['basis_funcs'] = {
+            search_config['opt_threshold'] = 0.1
+            search_config['basis_funcs'] = {
                 'default': PolynomialLibrary(degree=2),
                 'higher_order': [
                     lambda x: x ** 2, lambda x, y: x * y, lambda x: x ** 3,
                     lambda x, y: x * x * y, lambda x, y: x * y * y
                 ]}
-            sindy_config['basis_exprs'] = {
+            search_config['basis_exprs'] = {
                 'default': None,
                 'higher_order': [
                     lambda x: f'{x}^2', lambda x, y: f'{x} {y}',
@@ -35,8 +36,8 @@ def get_full_learning_config(model_name, sindy_config):
                 ]
             }
         case 'repressilator':
-            sindy_config['stlsq_threshold'] = 1.0
-            sindy_config['basis_funcs'] = {
+            search_config['opt_threshold'] = 1.0
+            search_config['basis_funcs'] = {
                 'hill_1': [lambda x: 1.0 / (1.0 + x)],
                 'hill_2': [lambda x: 1.0 / (1.0 + x ** 2)],
                 'hill_3': [lambda x: 1.0 / (1.0 + x ** 3)],
@@ -49,7 +50,7 @@ def get_full_learning_config(model_name, sindy_config):
                                lambda x: 1.0 / (1.0 + x ** 3),
                                lambda x: 1.0 / (1.0 + x ** 4)]
             }
-            sindy_config['basis_exprs'] = {
+            search_config['basis_exprs'] = {
                 'hill_1': [lambda x: f'/(1+{x})'],
                 'hill_2': [lambda x: f'/(1+{x}^2)'],
                 'hill_3': [lambda x: f'/(1+{x}^3)'],
@@ -64,21 +65,21 @@ def get_full_learning_config(model_name, sindy_config):
             }
 
 
-def get_latent_learning_config(model_name, sindy_config):
+def get_latent_learning_config(model_name, search_config):
     match model_name:
         case 'lotka_volterra':
-            sindy_config['stlsq_threshold'] = 0.1
-            sindy_config['basis_funcs'] = {
+            search_config['opt_threshold'] = 0.1
+            search_config['basis_funcs'] = {
                 'default': PolynomialLibrary(degree=2),
                 'higher_order': PolynomialLibrary(degree=3)
             }
-            sindy_config['basis_exprs'] = {
+            search_config['basis_exprs'] = {
                 'default': None,
                 'higher_order': None
             }
         case 'repressilator':
-            sindy_config['stlsq_threshold'] = 1.0
-            sindy_config['basis_funcs'] = {
+            search_config['opt_threshold'] = 1.0
+            search_config['basis_funcs'] = {
                 'hill_1': [lambda x: x, lambda x: 1.0 / (1.0 + x)],
                 'hill_2': [lambda x: x, lambda x: 1.0 / (1.0 + x ** 2)],
                 'hill_3': [lambda x: x, lambda x: 1.0 / (1.0 + x ** 3)],
@@ -93,7 +94,7 @@ def get_latent_learning_config(model_name, sindy_config):
                                lambda x: 1.0 / (1.0 + x ** 3),
                                lambda x: 1.0 / (1.0 + x ** 4)]
             }
-            sindy_config['basis_exprs'] = {
+            search_config['basis_exprs'] = {
                 'hill_1': [lambda x: f'{x}', lambda x: f'/(1+{x})'],
                 'hill_2': [lambda x: f'{x}', lambda x: f'/(1+{x}^2)'],
                 'hill_3': [lambda x: f'{x}', lambda x: f'/(1+{x}^3)'],
@@ -119,17 +120,13 @@ def recover_from_data(args, search_config, verbose) -> bool:
 
     search_config['recovered_dynamics'] = recovered_dynamics
 
-    model_prefix = get_model_prefix(args.model)
     noise_type = args.noise_type
     noise_level = args.noise_level
     data_source = args.data_source
     seed = args.seed
-    project_root = get_project_root()
-    output_dir = os.path.join(
-        project_root, 'outputs',
-        f'{model_prefix}-{data_source.replace("_", "-")}-baseline',
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        f'-sindy-model-selection')
+    output_dir = get_model_selection_dir(
+        args.model, noise_type, noise_level, seed, data_source, 'baseline',
+        'sindy')
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     search_config['output_dir'] = output_dir
@@ -155,24 +152,21 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
     print('Setting up SINDy learning from UDE model...', flush=True)
 
     # load learned UDE model
+    num_hidden_neurons = args.num_hidden_neurons
+    activation = args.activation
     print('Loading UDE model with lowest validation loss...', flush=True)
     print('Network architecture:', flush=True)
-    print(f'- Hidden neurons: {args.num_hidden_neurons}', flush=True)
-    print(f'- Activation function: {args.activation}', flush=True)
-    model_prefix = get_model_prefix(args.model)
+    print(f'- Hidden neurons: {num_hidden_neurons}', flush=True)
+    print(f'- Activation function: {activation}', flush=True)
     noise_type = args.noise_type
     noise_level = args.noise_level
     data_source = args.data_source
     seed = args.seed
-    project_root = get_project_root()
-    output_dir = f'{model_prefix}-{data_source.replace("_", "-")}-'
-    output_dir += f'{args.ude_rhs}-'
-    output_dir += '-'.join(str(i) for i in args.num_hidden_neurons)
-    output_dir += f'-{args.activation}'
-    output_dir = os.path.join(
-        project_root, 'outputs', output_dir,
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        f'-ude-model-selection')
+    nn_config = {'num_hidden_neurons': num_hidden_neurons,
+                 'activation': activation}
+    output_dir = get_model_selection_dir(
+        args.model, noise_type, noise_level, seed, data_source, 'ude', 'ude',
+        ude_rhs=args.ude_rhs, nn_config=nn_config)
 
     if not os.path.exists(output_dir):
         print('No UDE model found for the given architecture', flush=True)
@@ -201,28 +195,27 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
     if args.ude_rhs == 'nn':
         get_full_learning_config(args.model, search_config)
         neural_dynamics = model_module.get_neural_dynamics(
-            num_hidden_neurons=args.num_hidden_neurons,
-            activation=args.activation)
+            num_hidden_neurons=num_hidden_neurons, activation=activation)
 
         def recovered_dynamics(t, x, model):
             return model.predict(x[np.newaxis, :])[0]
-    else:
+    else:  # args.ude_rhs == 'hybrid'
         get_latent_learning_config(args.model, search_config)
 
         match args.model:
             case 'lotka_volterra':
                 growth_rates = np.array([params_true[0], -params_true[3]])
                 neural_dynamics = model_module.get_hybrid_dynamics(
-                    growth_rates, num_hidden_neurons=args.num_hidden_neurons,
-                    activation=args.activation)
+                    growth_rates, num_hidden_neurons=num_hidden_neurons,
+                    activation=activation)
 
                 def recovered_dynamics(t, x, model):
                     return growth_rates * x + model.predict(
                         x[np.newaxis, :])[0]
             case 'repressilator':
                 neural_dynamics = model_module.get_hybrid_dynamics(
-                    num_hidden_neurons=args.num_hidden_neurons,
-                    activation=args.activation)
+                    num_hidden_neurons=num_hidden_neurons,
+                    activation=activation)
 
                 def recovered_dynamics(t, x, model):
                     return model.predict(x[np.newaxis, :])[0] - x
@@ -242,14 +235,11 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
     print('UDE model loaded', flush=True)
 
     # set up for SINDy model selection
-    output_dir = os.path.join(
-        os.path.split(output_dir)[0],
-        f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}'
-        '-sindy-model-selection')
-
+    output_dir = get_model_selection_dir(
+        args.model, noise_type, noise_level, seed, data_source, 'ude',
+        'sindy', ude_rhs=args.ude_rhs, nn_config=nn_config)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
     search_config['output_dir'] = output_dir
     ude_learner.output_dir = output_dir
     search_config['ude_learner'] = ude_learner
@@ -263,7 +253,7 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
 
 
 def search_time_steps(search_config, ude_train_samples, verbose=False):
-    t_sindy_span = search_config['t_sindy_span']
+    sindy_t_span = search_config['sindy_t_span']
     ude_learner = search_config['ude_learner']
     train_samples = search_config['train_samples']
     num_train_samples = len(ude_train_samples)
@@ -307,7 +297,7 @@ def search_time_steps(search_config, ude_train_samples, verbose=False):
 
             # cut off some initial and final time points
             t_sindy_indices = np.where(
-                (ts.t >= t_sindy_span[0]) & (ts.t <= t_sindy_span[1]))[0]
+                (ts.t >= sindy_t_span[0]) & (ts.t <= sindy_t_span[1]))[0]
             if t_sindy_indices.size == 0:
                 raise ValueError('No data for SINDy training on the given '
                                  'time span')
@@ -388,14 +378,14 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
     optimizer_args = model_info['optimizer_args']
     output_prefix = f't_step_{t_step:.2f}_pysindy_basis_{basis}_'
     if normalize_columns:
-        output_prefix += 'normalized_'
+        output_prefix += f'normalized_opt_{optimizer_name}'
     else:
-        output_prefix += 'unnormalized_'
+        output_prefix += f'unnormalized_opt_{optimizer_name}'
     for arg_name, arg_val in optimizer_args.items():
         if isinstance(arg_val, numbers.Number):
-            output_prefix += f'opt_{optimizer_name}_{arg_name}_{arg_val:.2f}'
+            output_prefix += f'_{arg_name}_{arg_val:.2f}'
         else:
-            output_prefix += f'opt_{optimizer_name}_{arg_name}_{arg_val}'
+            output_prefix += f'_{arg_name}_{arg_val}'
 
     print('Running SINDy with the following settings:', flush=True)
     print(f't_step = {t_step:.2f}', flush=True)
@@ -420,7 +410,7 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
         },
     }
     eq_learner.train(optimizer_type=sindy_optimizers[optimizer_name],
-                     threshold=search_config['stlsq_threshold'],
+                     threshold=search_config['opt_threshold'],
                      learn_dx=search_config['learn_dx'],
                      normalize_columns=normalize_columns,
                      basis_funcs=basis_funcs[basis],
@@ -492,7 +482,7 @@ def get_args():
     arg_parser.add_argument('--activation', type=str, default='tanh',
                             choices=['tanh', 'relu', 'rbf'],
                             help='Activation function for the neural network')
-    arg_parser.add_argument('--t_sindy_span', nargs=2, type=float,
+    arg_parser.add_argument('--sindy_t_span', nargs=2, type=float,
                             default=[-np.inf, np.inf], metavar=('T0', 'T_END'),
                             help='Time span of SINDy training data')
     arg_parser.add_argument('--matplotlib_backend', type=str, default='Agg',
@@ -518,11 +508,6 @@ def get_upper_bound_checker(upper_bound):
     return check_upper_bound
 
 
-def get_project_root():
-    return os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '..', '..'))
-
-
 def main():
     args = get_args()
     verbose = args.verbose
@@ -533,18 +518,13 @@ def main():
     matplotlib.rcParams['ps.fonttype'] = 42
 
     # initialize model and data
-    search_config = {}
     noise_type = args.noise_type
     noise_level = args.noise_level
     seed = args.seed
     print('Loading data...', flush=True)
-    project_root = get_project_root()
-    model_prefix = get_model_prefix(args.model)
     data_source = args.data_source
-    data_path = os.path.join(
-        project_root, 'data',
-        f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}'
-        f'_seed_{seed:04d}_{data_source}.h5')
+    data_path = get_data_path(args.model, noise_type, noise_level, seed,
+                              data_source)
     data_fd = h5py.File(data_path, 'r')
     if 'param_values' in data_fd.attrs:
         params_true = data_fd.attrs['param_values']
@@ -571,16 +551,15 @@ def main():
     print(f'- Test dataset size: {len(valid_samples)}', flush=True)
 
     # set up model selection
+    search_config = {}
     search_config['noise_type'] = noise_type
     search_config['noise_level'] = noise_level
     search_config['t_train_span'] = t_train_span
-    t_sindy_span = args.t_sindy_span
-    if t_sindy_span[0] < t_train_span[0]:
-        t_sindy_span[0] = t_train_span[0]
-    if t_sindy_span[1] > t_train_span[1]:
-        t_sindy_span[1] = t_train_span[1]
-    search_config['t_sindy_span'] = tuple(t_sindy_span)
-    t_span_str = ', '.join(str(t) for t in search_config['t_sindy_span'])
+    sindy_t_span = args.sindy_t_span
+    sindy_t_span[0] = max(sindy_t_span[0], t_train_span[0])
+    sindy_t_span[1] = min(sindy_t_span[1], t_train_span[1])
+    search_config['sindy_t_span'] = tuple(sindy_t_span)
+    t_span_str = ', '.join(str(t) for t in search_config['sindy_t_span'])
     print(f'Time span for SINDy training: ({t_span_str})', flush=True)
     search_config['train_samples'] = train_samples
     search_config['valid_samples'] = valid_samples
