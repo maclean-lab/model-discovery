@@ -1,13 +1,11 @@
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Optional, Literal
+from typing import Callable, Literal
 import numpy as np
 from scipy.integrate import solve_ivp
 import torch
 from torch import nn
 
 from time_series_data import TimeSeries
-
-# TODO: move all model classes to dedicated modules
 
 
 class DynamicalModel(metaclass=ABCMeta):
@@ -20,24 +18,26 @@ class DynamicalModel(metaclass=ABCMeta):
     _DEFAULT_T = np.empty(0)
 
     def __init__(self, param_values: np.ndarray | None = None,
-                 x0: np.ndarray | None = None, t: np.ndarray | None = None
-                 ) -> None:
+                 x0: np.ndarray | None = None,
+                 t: np.ndarray | None = None) -> None:
         """Abstract base class for dynamical models with an underlying system
         of ordinary differential equations.
 
         To implement an actual class of dynamical models, the following
         constants should be defined:
-            - _NUM_VARIABLES: number of variables in the model
-            - _VARIABLE_NAMES: names of the variables
-            - _PARAM_NAMES: names of the parameters
-            - _DEFAULT_PARAM_VALUES: default values of the parameters
-            - _DEFAULT_X0: default initial conditions
-            - _DEFAULT_T_STEP: default step size of time points
-            - _DEFAULT_T: default time points
-        In addition, the following method should be implemented:
-            - equations: right-hand side of the ODE system, which has the form
-              `f(t, x, p=self._param_values)` and can be used by
-              scipy.integrate.solve_ivp to simulate the model
+            - `_NUM_VARIABLES`: number of variables in the model
+            - `_VARIABLE_NAMES`: names of the variables
+            - `_PARAM_NAMES`: names of the parameters
+            - `_DEFAULT_PARAM_VALUES`: default values of the parameters
+            - `_DEFAULT_X0`: default initial conditions
+            - `_DEFAULT_T_STEP`: default step size of time points
+            - `_DEFAULT_T`: default time points
+        In addition, if the governing ODE system is known:
+            - Set has_equations to True
+            - Implement the equations property, which is right-hand side of the
+              ODE system and returns a function of the form
+              `f(t, x, p=self._param_values)`. The function is to be used by
+              scipy.integrate.solve_ivp for simulating the model
         The following constants can be optionally defined:
             - _DEFAULT_T_STEP: default step size of time points, which is
                 needed only when _DEFAULT_T has uniform step size
@@ -94,6 +94,8 @@ class DynamicalModel(metaclass=ABCMeta):
                 if np.all(t_diff == t_diff[0]):
                     self._t_step = t_diff[0]
 
+        self._has_equations = False
+
     def __check_params(self, param_values: np.ndarray):
         """Check if the input parameters are valid.
 
@@ -131,7 +133,7 @@ class DynamicalModel(metaclass=ABCMeta):
 
             raise ValueError(msg)
 
-    def __check_t(self, t: np.ndarray):
+    def __check_t(self, t: np.ndarray) -> None:
         """Check if the input time points are valid.
 
         Args:
@@ -146,7 +148,7 @@ class DynamicalModel(metaclass=ABCMeta):
 
         for i in range(t.size - 1):
             if t[i] >= t[i + 1]:
-                raise ValueError('t must be a monotonically increasing array')
+                raise ValueError('t must be monotonically increasing')
 
     @property
     def num_variables(self) -> int:
@@ -170,6 +172,10 @@ class DynamicalModel(metaclass=ABCMeta):
         self._param_values = param_values.copy()
 
     @property
+    def has_equations(self) -> bool:
+        return self._has_equations
+
+    @property
     @abstractmethod
     def equations(self) -> Callable:
         """Right-hand side of the governing ordinary differential equations.
@@ -184,6 +190,14 @@ class DynamicalModel(metaclass=ABCMeta):
             # compute dx here
 
             return dx
+
+        ```
+
+        For a model with no known ODE system, raise an error as follows:
+        ```
+        def equations(self):
+            raise NotImplementedError(
+                'model does not have governing equations')
         ```
         """
         pass
@@ -273,35 +287,55 @@ class DynamicalModel(metaclass=ABCMeta):
 
         return TimeSeries(solution.t, solution.y.T)
 
-    def get_samples(self, num_samples: int,
-                    noise_type:
-                    Literal['additive', 'multiplicative'] = 'additive',
-                    noise_level: float = 0.0, clean_x0: bool = False,
-                    bounds: list[tuple[float, float]] | None = None,
-                    integrator_kwargs: dict | None = None,
-                    rng: Optional[np.random.Generator] = None,
-                    ) -> list[TimeSeries]:
+    def get_samples(
+        self,
+        num_samples: int,
+        bounds: list[tuple[float, float]] | None = None,
+        noise_type: Literal['additive', 'multiplicative'] = 'additive',
+        noise_level: float = 0.0,
+        clean_x0: bool = False,
+        integrator_kwargs: dict | None = None,
+        rng: np.random.Generator | None = None,
+    ) -> list[TimeSeries]:
         """Generate time series samples from the model.
 
         Can generate noiseless time series if noise_level is set to 0.0.
 
         Args:
-            num_samples (int): the number of time series to generate.
-            noise_type (Literal['additive', 'multiplicative'], optional): the
-                type of noise to add to the data. Defaults to 'additive'.
-            noise_level (float, optional): the level of noise. Defaults to 0.0.
-            clean_x0 (bool, optional): whether to use noise-free values for
-                initial conditions. Defaults to False.
+            num_samples (int): the number of samples (i.e. number of
+                multivariate time series) to generate.
             bounds (list[tuple[float, float]] | None, optional): lower and
                 upper bounds of generated values for each variable. Defaults to
                 None, in which case no bounds are imposed.
-            rng (Optional[np.random.Generator], optional): a random number
+            noise_type (Literal['additive', 'multiplicative'], optional): the
+                type of noise to add to the data. Defaults to 'additive'.
+            noise_level (float, optional): the level of noise. For additive
+                noise, the standard deviation of the noise for a variable is
+                the same for all time points. For multiplicative noise, the
+                standard deviation of the noise is proportional to the value of
+                the variable at each time point. Defaults to 0.0, in which case
+                no noise is added.
+            clean_x0 (bool, optional): whether to use noise-free values for
+                initial conditions. Defaults to False.
+            rng (Optional[np.random.Generator], optional): random number
                 generator. Defaults to None.
 
         Returns:
             list[TimeSeries]: a list of noisy time series generated from the
                 model (clean if noise_level is set 0.0).
+
+        Raises:
+            NotImplementedError: if the governing equations of the model are
+                not implemented.
+            ValueError: if bounds has a different length than the number of
+                variables.
+            ValueError: if lower bound of a variable is greater than or equal
+                to its upper bound.
         """
+        if not self._has_equations:
+            raise NotImplementedError(
+                'No governing equations defined for the model')
+
         # check lower and upper bounds
         if bounds is None:
             bounds = [(None, None)] * self._NUM_VARIABLES
@@ -322,7 +356,7 @@ class DynamicalModel(metaclass=ABCMeta):
                     processed_bounds[1] = ub
                 bounds[i] = tuple(processed_bounds)
 
-        # get clean data
+        # simulate clean data from known ODEs
         if integrator_kwargs is None:
             integrator_kwargs = {}
         integrator_kwargs['t_eval'] = self._t
@@ -331,13 +365,7 @@ class DynamicalModel(metaclass=ABCMeta):
         t_span = (self._t[0], self._t[-1])
         x = self.simulate(t_span, self._x0, **integrator_kwargs).x
 
-        # initialize random number generator
-        if rng is None:
-            rng = np.random.default_rng()
-
-        # generate samples
-        ts_samples = []
-
+        # get noise scale from noise type and noise level
         match noise_type:
             case 'additive':
                 # noise_scale.shape = (num_vars, )
@@ -346,11 +374,16 @@ class DynamicalModel(metaclass=ABCMeta):
                 # noise_scale.shape = x.shape = (t.size, num_vars)
                 noise_scale = noise_level * x
 
+        # initialize random number generator
+        if rng is None:
+            rng = np.random.default_rng()
+
+        # generate samples
+        ts_samples = []
         for _ in range(num_samples):
             if noise_level > 0:
                 # generate a noisy observation
-                x_noise = rng.normal(size=x.shape) * noise_scale
-                x_obs = x + x_noise
+                x_obs = x + rng.normal(size=x.shape) * noise_scale
 
                 if clean_x0:
                     # recover x0
@@ -376,6 +409,7 @@ class NeuralDynamics(nn.Module):
         """Neural network for the latent derivatives.
 
         Args:
+            num_vars: number of variables in the dynamical model.
             num_neurons: number of neurons in each hidden layer.
             activation: activation function to use between layers.
         """
@@ -405,85 +439,3 @@ class NeuralDynamics(nn.Module):
 def rbf_activation(x):
     """Radial basis function activation."""
     return torch.exp(-x * x)
-
-
-class EcosystemModel(DynamicalModel):
-    _NUM_VARIABLES = 3
-    _PARAM_NAMES = ['alpha_1', 'alpha_2', 'delta_1', 'delta_2', 'delta_3']
-    _DEFAULT_PARAM_VALUES = np.array([0.2, 0.3, 0.05, 0.09, 0.1])
-    _DEFAULT_X0 = np.array([20.0, 20.0, 10.0])
-    _DEFAULT_T = np.arange(0.0, 20.0 + 1e-8, 0.5)
-
-    def __init__(self, param_values: np.ndarray | None = None,
-                 x0: np.ndarray | None = None, t: np.ndarray | None = None
-                 ) -> None:
-        """A three-species ecosystem model.
-
-        Model parameters are: alpha_1, alpha_2, delta_1, delta_2, delta_3.
-
-        Args:
-            param_values (np.ndarray | None, optional): values of model
-                parameters of the ecosystem model. Defaults to None, in which
-                case is set to [0.2, 0.3, 0.05, 0.09, 0.1].
-            x0 (np.ndarray | None, optional): initial conditions. Defaults to
-                None, in which it is set to [20.0, 20.0, 10.0].
-            t (np.ndarray | None, optional): time points. Defaults to None, in
-                which case it is set to an array on [0, 20] with step size 0.5.
-        """
-        super().__init__(param_values, x0, t)
-
-    @property
-    def equations(self) -> Callable:
-        def _f(t, x, p=self._param_values):
-            dx = np.empty(3)
-
-            dx[0] = p[0] * x[0] * (1 - 0.01 * x[0] - 0.05 * x[1]) - p[2] * x[0]
-            dx[1] = p[1] * x[0] * (1 - 0.08 * x[2]) - p[3] * x[1]
-            dx[2] = p[3] * x[1] - p[4] * x[2]
-
-            return dx
-
-        return _f
-
-
-class EcosystemModelAlt(DynamicalModel):
-    # An alternative ecosystem model
-    _NUM_VARIABLES = 3
-    _PARAM_NAMES = ['alpha_1', 'alpha_2', 'delta_1', 'delta_2', 'delta_3']
-    _DEFAULT_PARAM_VALUES = np.array([0.2, 0.3, 0.2, 0.3, 0.1])
-    _DEFAULT_X0 = np.array([20.0, 20.0, 10.0])
-    _DEFAULT_T = np.arange(0.0, 20.0 + 1e-8, 0.5)
-
-    def __init__(self, param_values: np.ndarray | None = None,
-                 x0: np.ndarray | None = None, t: np.ndarray | None = None
-                 ) -> None:
-        """An alternative three-species ecosystem model.
-
-        Model parameters are: alpha_1, alpha_2, delta_1, delta_2, delta_3.
-        Note: for now, some species will have negative population values using
-        the default parameter values.
-
-        Args:
-            param_values (np.ndarray | None, optional): values of model
-                parameters, namely alpha_1, alpha_2, delta_1, delta_2, delta_3.
-                Defaults to None, in which case it is set to
-                [0.2, 0.3, 0.2, 0.3, 0.1].
-            x0 (np.ndarray | None, optional): initial conditions. Defaults to
-                None, in which it is set to [20.0, 20.0, 10.0].
-            t (np.ndarray | None, optional): time points. Defaults to None, in
-                which case it is set to an array on [0, 20] with step size 0.5.
-        """
-        super().__init__(param_values, x0, t)
-
-    @property
-    def equations(self) -> Callable:
-        def _f(t, x, p=self._param_values):
-            dx = np.empty(3)
-
-            dx[0] = p[0] * x[0] * (1 - x[0] - x[1]) - p[2] * x[0]
-            dx[1] = p[1] * x[0] * (1 - x[2]) - p[3] * x[1]
-            dx[2] = p[3] * x[1] - p[4] * x[2]
-
-            return dx
-
-        return _f

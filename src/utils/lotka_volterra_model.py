@@ -32,7 +32,8 @@ class LotkaVolterraModel(DynamicalModel):
                 which case will be set to an array on [0, 4] with step size
                 0.1.
         """
-        super().__init__(param_values, x0, t)
+        super().__init__(param_values=param_values, x0=x0, t=t)
+        self._has_equations = True
 
     @property
     def equations(self) -> Callable:

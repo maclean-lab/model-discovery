@@ -26,11 +26,12 @@ def get_args():
         description='Plot generated data for a dynamical model.')
 
     arg_parser.add_argument('--model', type=str, required=True,
-                            choices=['lotka_volterra', 'repressilator'],
+                            choices=['lotka_volterra', 'repressilator', 'emt'],
                             help='Dynamical model to generate data from')
-    arg_parser.add_argument('--noise_type', type=str, required=True,
-                            choices=['none', 'additive', 'multiplicative'],
-                            help='Type of noise to add to data')
+    arg_parser.add_argument(
+        '--noise_type', type=str, required=True,
+        choices=['none', 'fixed', 'additive', 'multiplicative'],
+        help='Type of noise to add to data')
 
     # figure related arguments
     arg_parser.add_argument('--backend', type=str, default='Agg',
@@ -40,6 +41,9 @@ def get_args():
                             help='Figure size in inches')
     arg_parser.add_argument('--figure_dpi', type=int, default=300,
                             help='Figure resolution in dots per inch')
+    arg_parser.add_argument('--plot_type', type=str, default='line',
+                            choices=['line', 'strip'],
+                            help='Type of plot to generate')
     arg_parser.add_argument('--x_label', type=str, nargs='?', const='',
                             default='', help='Label of x-axis')
     arg_parser.add_argument('--y_label', type=str, nargs='?', const='',
@@ -61,13 +65,14 @@ def get_args():
                                 help='Initial conditions of data')
 
         default_param_values = model_class.get_default_param_values().tolist()
-        param_meta_names = tuple(
-            pn.upper() for pn in model_class.get_param_names())
-        arg_parser.add_argument('--param_values',
-                                nargs=len(default_param_values), type=float,
-                                default=default_param_values,
-                                metavar=param_meta_names,
-                                help='Parameter values of the model')
+        if len(default_param_values) > 0:
+            param_meta_names = tuple(
+                pn.upper() for pn in model_class.get_param_names())
+            arg_parser.add_argument('--param_values',
+                                    nargs=len(default_param_values),
+                                    type=float, default=default_param_values,
+                                    metavar=param_meta_names,
+                                    help='Parameter values of the model')
 
         default_t_span = model_class.get_default_t_span()
         default_t_step = model_class.get_default_t_step()
@@ -82,7 +87,7 @@ def get_args():
                                 help='Time step for simulating data')
     else:
         # noisy data
-        arg_parser.add_argument('--noise_level', type=float, required=True,
+        arg_parser.add_argument('--noise_level', type=float, default=0.01,
                                 help='Noise level of generated data')
         arg_parser.add_argument('--seed', type=int, default=2023,
                                 help='Random seed for generating data')
@@ -175,16 +180,39 @@ def plot_noisy_data(args):
 
     if not os.path.exists(figure_dir):
         os.makedirs(figure_dir)
-    figure_path = f'{noise_type}_noise_{noise_level:.03f}_seed_{seed:04d}'
-    figure_path += f'_{data_source}_{dataset}_data.pdf'
+    figure_path = f'{noise_type}_noise'
+    if noise_type != 'fixed':
+        figure_path += f'_{noise_level:.03f}'
+    figure_path += f'_seed_{seed:04d}_{data_source}_{dataset}_data'
+    if args.plot_type == 'line':
+        figure_path += '.pdf'
+    else:
+        figure_path += f'_{args.plot_type}.pdf'
     figure_path = os.path.join(figure_dir, figure_path)
     model_class = get_model_class(args.model)
     data_colors = get_data_colors(model_class.get_num_variables())
 
     plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
-    g = sns.lineplot(data=long_data, x='Time', y='Value', hue='Variable',
-                     palette=data_colors, linewidth=1, errorbar=('sd', 3),
-                     err_style='band', legend=args.legend)
+
+    match args.plot_type:
+        case 'line':
+            g = sns.lineplot(
+                data=long_data, x='Time', y='Value', hue='Variable',
+                palette=data_colors, linewidth=1, errorbar=('sd', 3),
+                err_style='band', legend=args.legend)
+        case 'strip':
+            g = sns.stripplot(
+                data=long_data, x='Time', y='Value', hue='Variable',
+                palette=data_colors, jitter=True, dodge=True, size=1.0,
+                alpha=0.5, legend=args.legend)
+    if args.model == 'emt':
+        xticks = g.get_xticks()
+        xtick_labels = [float(t.get_text().replace('−', '-'))
+                        for t in g.get_xticklabels()]
+
+        if all(t.is_integer() for t in xtick_labels):
+            xtick_labels = [f'{int(t)}' for t in xtick_labels]
+            g.set_xticks(xticks, labels=xtick_labels)
     g.set_xlabel(args.x_label)
     g.set_ylabel(args.y_label)
     plt.savefig(figure_path, transparent=True)

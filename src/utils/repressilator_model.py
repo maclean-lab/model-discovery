@@ -28,10 +28,16 @@ class RepressilatorModel(DynamicalModel):
 
         Args:
             param_values (np.ndarray | None, optional): values of model
-                parameters, namely beta and n.  Defaults parameter values are
+                parameters, namely beta and n. Defaults parameter values are
                 beta = 10.0, n = 3.
+            x0 (np.ndarray | None, optional): initial conditions. Defaults to
+                None, in which case it is set to [1.0, 1.0, 1.2].
+            t (np.ndarray | None, optional): time points. Defaults to None, in
+                which case will be set to an array on [0, 10] with step size
+                0.2.
         """
-        super().__init__(param_values, x0, t)
+        super().__init__(param_values=param_values, x0=x0, t=t)
+        self._has_equations = True
 
     @property
     def equations(self) -> Callable:

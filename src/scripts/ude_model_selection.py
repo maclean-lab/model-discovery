@@ -22,13 +22,13 @@ def get_args():
     arg_parser = ArgumentParser(
         description='Find the best UDE model that fits noisy data.')
     arg_parser.add_argument('--model', type=str, required=True,
-                            choices=['lotka_volterra', 'repressilator'],
+                            choices=['lotka_volterra', 'repressilator', 'emt'],
                             help='Dynamical model from which data is '
                             'generated')
     arg_parser.add_argument('--noise_type', type=str, required=True,
-                            choices=['additive', 'multiplicative'],
+                            choices=['fixed', 'additive', 'multiplicative'],
                             help='Type of noise added to data')
-    arg_parser.add_argument('--noise_level', type=float, required=True,
+    arg_parser.add_argument('--noise_level', type=float, default=0.01,
                             help='Noise level for generating training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
@@ -230,6 +230,8 @@ def main():
                     neural_dynamics = model_module.get_hybrid_dynamics(
                         num_hidden_neurons=args.num_hidden_neurons,
                         activation=args.activation)
+                case 'emt':
+                    neural_dynamics = model_module.get_hybrid_dynamics()
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
         ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
                                            output_prefix)

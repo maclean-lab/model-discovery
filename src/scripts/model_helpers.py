@@ -2,6 +2,7 @@ import os.path
 
 import lotka_volterra_model
 import repressilator_model
+import emt_model
 
 
 def get_model_module(model_name):
@@ -10,6 +11,8 @@ def get_model_module(model_name):
             return lotka_volterra_model
         case 'repressilator':
             return repressilator_model
+        case 'emt':
+            return emt_model
         case _:
             raise ValueError(f'Unknown model name: {model_name}')
 
@@ -20,6 +23,8 @@ def get_model_class(model_name):
             return lotka_volterra_model.LotkaVolterraModel
         case 'repressilator':
             return repressilator_model.RepressilatorModel
+        case 'emt':
+            return emt_model.EmtModel
         case _:
             raise ValueError(f'Unknown model name: {model_name}')
 
@@ -30,6 +35,8 @@ def get_model_prefix(model_name):
             return 'lv'
         case 'repressilator':
             return 'rep'
+        case 'emt':
+            return 'emt'
         case _:
             raise ValueError(f'Unknown model name: {model_name}')
 
@@ -47,8 +54,10 @@ def get_project_root():
 def get_data_path(model, noise_type, noise_level, seed, data_source):
     data_dir = os.path.join(get_project_root(), 'data')
     model_prefix = get_model_prefix(model)
-    data_path = f'{model_prefix}_{noise_type}_noise_{noise_level:.03f}' \
-                f'_seed_{seed:04d}_{data_source}.h5'
+    data_path = f'{model_prefix}_{noise_type}_noise'
+    if noise_type != 'fixed':
+        data_path += f'_{noise_level:.03f}'
+    data_path += f'_seed_{seed:04d}_{data_source}.h5'
 
     return os.path.join(data_dir, data_path)
 
@@ -79,8 +88,10 @@ def get_model_selection_dir(model, noise_type, noise_level, seed, data_source,
                             pipeline, step, ude_rhs=None, nn_config=None):
     pipeline_dir = get_pipeline_dir(model, data_source, pipeline,
                                     ude_rhs=ude_rhs, nn_config=nn_config)
-    output_dir = f'{noise_type}-noise-{noise_level:.3f}-seed-{seed:04d}' \
-                 f'-{step}-model-selection'
+    output_dir = f'{noise_type}-noise'
+    if noise_type != 'fixed':
+        output_dir += f'-{noise_level:.3f}'
+    output_dir += f'-seed-{seed:04d}-{step}-model-selection'
 
     return os.path.join(pipeline_dir, output_dir)
 
