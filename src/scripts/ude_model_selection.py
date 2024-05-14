@@ -149,7 +149,8 @@ def main():
     param_str = ', '.join(str(p) for p in params_true)
     print(f'- True parameter value: [{param_str}]', flush=True)
     print(f'- Noise type: {noise_type}', flush=True)
-    print(f'- Noise level: {noise_level}', flush=True)
+    if noise_type != 'fixed':
+        print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
     print(f'- Data source: {data_source}', flush=True)
     print(f'- Data preprocessor: {data_preprocessor}', flush=True)
