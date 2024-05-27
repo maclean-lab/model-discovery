@@ -243,7 +243,7 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
         case 'repressilator':
             search_config['t_ude_steps'] = [0.2, 0.1]
         case 'emt':
-            search_config['t_ude_steps'] = [1.0, 0.5]
+            search_config['t_ude_steps'] = [1.0, 0.5, 0.25, 0.1]
     search_config['learn_dx'] = True
     ude_learner = NeuralDynamicsLearner(
         search_config['train_samples'], output_dir, output_prefix)
