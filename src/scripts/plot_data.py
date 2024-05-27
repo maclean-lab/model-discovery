@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 import numpy as np
 import pandas as pd
 import pysindy as ps
+from pysindy.differentiation import FiniteDifference
 import h5py
 import matplotlib
 import matplotlib.pyplot as plt
@@ -96,6 +97,8 @@ def get_args():
         arg_parser.add_argument('--dataset', type=str, default='train',
                                 choices=['train', 'valid', 'test'],
                                 help='Dataset to plot, e.g. train')
+        arg_parser.add_argument('--plot_dx', action='store_true',
+                                help='Whether to plot dx instead of x')
 
         # optional arguments for UDE
         arg_parser.add_argument('--ude_rhs', type=str, default='none',
@@ -219,6 +222,55 @@ def plot_noisy_data(args):
     plt.close('all')
 
 
+def plot_sindy_dx(args):
+    # unpack arguments
+    noise_type = args.noise_type
+    noise_level = args.noise_level
+    seed = args.seed
+    data_source = args.data_source
+    dataset = args.dataset
+
+    data_path = get_data_path(args.model, noise_type, noise_level, seed,
+                              data_source)
+    data_fd = h5py.File(data_path, 'r')
+    params_true = data_fd.attrs['param_values']
+    x0 = data_fd.attrs['x0']
+    samples = load_dataset_from_h5(data_fd, dataset)
+    data_fd.close()
+
+    get_true_dx(args, params_true, x0, samples)
+    dx_method = FiniteDifference()
+
+    figure_dir = get_figure_dir(args.model)
+    if not os.path.exists(figure_dir):
+        os.makedirs(figure_dir)
+    figure_path = f'{noise_type}_noise'
+    if noise_type != 'fixed':
+        figure_path += f'_{noise_level:.03f}'
+    figure_path += f'_seed_{seed:04d}_{data_source}_{dataset}_sindy_dx.pdf'
+    figure_path = os.path.join(figure_dir, figure_path)
+    model_class = get_model_class(args.model)
+    num_vars = model_class.get_num_variables()
+    data_colors = get_data_colors(num_vars)
+    data_labels = model_class.get_variable_names()
+
+    with PdfPages(figure_path) as pdf:
+        for ts in samples:
+            plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
+            dx = dx_method._differentiate(ts.x, ts.t)
+            for i in range(num_vars):
+                plt.plot(ts.t, ts.dx[:, i], marker='o', linestyle='none',
+                         color=data_colors[i], alpha=0.3, label=data_labels[i])
+                plt.plot(ts.t, dx[:, i], color=data_colors[i],
+                         label=data_labels[i])
+            plt.xlabel(args.x_label)
+            plt.ylabel(args.y_label)
+            if args.legend:
+                plt.legend()
+            pdf.savefig(transparent=True)
+            plt.close('all')
+
+
 def plot_ude_data(args):
     # unpack arguments
     noise_type = args.noise_type
@@ -229,6 +281,8 @@ def plot_ude_data(args):
     ude_rhs = args.ude_rhs
     num_hidden_neurons = args.num_hidden_neurons
     activation = args.activation
+    # for now, plotting dx for EMT model is not supported
+    plot_dx = args.plot_dx and args.model != 'emt'
 
     data_path = get_data_path(args.model, noise_type, noise_level, seed,
                               data_source)
@@ -237,9 +291,10 @@ def plot_ude_data(args):
     params_true = data_fd.attrs['param_values']
     if t_step == 0.0:
         t_step = data_fd['train'].attrs['t_step']
+    x0 = data_fd.attrs['x0']
     data_fd.close()
 
-    # get hyperparams from args
+    # get hyperparameters from args
     learning_rate = args.ude_learning_rate
     window_size = args.ude_window_size
     batch_size = args.ude_batch_size
@@ -250,6 +305,11 @@ def plot_ude_data(args):
     else:
         hyperparams = None
 
+    # get true derivative data
+    if plot_dx:
+        get_true_dx(args, params_true, x0, train_samples, ude_rhs=ude_rhs)
+
+    # get predicted data from trained UDE model
     pred_samples = simulate_ude_model(
         train_samples, t_step, args, params_true=params_true,
         hyperparams=hyperparams)
@@ -261,21 +321,34 @@ def plot_ude_data(args):
     ude_model_alias += f'_{activation}_lr_{learning_rate:.03f}'
     ude_model_alias += f'_window_size_{window_size:02d}'
     ude_model_alias += f'_batch_size_{batch_size:02d}'
-    figure_path = f'{noise_type}_noise_{noise_level:.03f}_seed_{seed:04d}' \
-                  f'_{data_source}_{ude_model_alias}_pred_data.pdf'
+    figure_path = f'{noise_type}_noise'
+    if noise_type != 'fixed':
+        figure_path += f'_{noise_level:.03f}'
+    figure_path += f'_seed_{seed:04d}_{data_source}_{ude_model_alias}'
+    if plot_dx:
+        figure_path += '_pred_dx.pdf'
+    else:
+        figure_path += '_pred_data.pdf'
     figure_path = os.path.join(figure_dir, figure_path)
     model_class = get_model_class(args.model)
     num_vars = model_class.get_num_variables()
     data_colors = get_data_colors(num_vars)
     data_labels = model_class.get_variable_names()
+
     with PdfPages(figure_path) as pdf:
         for ts_pred, ts_train in zip(pred_samples, train_samples):
             plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
             for i in range(num_vars):
-                plt.plot(ts_train.t, ts_train.x[:, i], marker='o',
-                         linestyle='none', color=data_colors[i], alpha=0.3,
-                         label=data_labels[i])
-                plt.plot(ts_pred.t, ts_pred.x[:, i], color=data_colors[i],
+                if plot_dx:
+                    y_train = ts_train.dx[:, i]
+                    y_pred = ts_pred.dx[:, i]
+                else:
+                    y_train = ts_train.x[:, i]
+                    y_pred = ts_pred.x[:, i]
+
+                plt.plot(ts_train.t, y_train, marker='o', linestyle='none',
+                         color=data_colors[i], alpha=0.3, label=data_labels[i])
+                plt.plot(ts_pred.t, y_pred, color=data_colors[i],
                          label=data_labels[i])
             plt.xlabel(args.x_label)
             plt.xlabel(args.y_label)
@@ -420,6 +493,25 @@ def plot_sindy_data(args):
             plt.close('all')
 
 
+def get_true_dx(args, params_true, x0, samples, ude_rhs='none'):
+    model = get_model_class(args.model)(param_values=params_true, x0=x0)
+    true_dynamics = model.equations
+
+    for ts in samples:
+        model.t = ts.t
+        clean_sample = model.get_samples(1, noise_level=0.0)[0]
+        dx = np.array([true_dynamics(t, x) for t, x in
+                       zip(clean_sample.t, clean_sample.x)])
+        if ude_rhs == 'hybrid':
+            if args.model == 'lotka_volterra':
+                growth_rates = np.array([params_true[0], -params_true[3]])
+            else:  # args.model == 'repressilator'
+                growth_rates = -np.ones(model.num_variables)
+            dx = dx - growth_rates * clean_sample.x
+
+        ts.dx = dx
+
+
 def simulate_ude_model(samples, t_step, args, params_true=None,
                        hyperparams=None):
     # unpack arguments
@@ -544,6 +636,8 @@ def main():
             plot_sindy_data(args)
         elif args.ude_rhs != 'none':
             plot_ude_data(args)
+        elif args.plot_dx:
+            plot_sindy_dx(args)
         else:
             plot_noisy_data(args)
 

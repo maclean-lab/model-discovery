@@ -63,6 +63,14 @@ def get_full_learning_config(model_name, search_config):
                                lambda x: f'/(1+{x}^3)',
                                lambda x: f'/(1+{x}^4)']
             }
+        case 'emt':
+            search_config['opt_threshold'] = 0.01
+            search_config['basis_funcs'] = {
+                'default': PolynomialLibrary(degree=2),
+            }
+            search_config['basis_exprs'] = {
+                'default': None,
+            }
 
 
 def get_latent_learning_config(model_name, search_config):
@@ -109,6 +117,9 @@ def get_latent_learning_config(model_name, search_config):
                                lambda x: f'/(1+{x}^3)',
                                lambda x: f'/(1+{x}^4)']
             }
+        case 'emt':
+            raise ValueError('Latent learning is not supported for the EMT '
+                             'model')
 
 
 def recover_from_data(args, search_config, verbose) -> bool:
@@ -136,6 +147,8 @@ def recover_from_data(args, search_config, verbose) -> bool:
             t_step = 0.1
         case 'repressilator':
             t_step = 0.2
+        case 'emt':
+            t_step = 1.0
 
     search_config['learn_dx'] = False
 
@@ -219,6 +232,8 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
 
                 def recovered_dynamics(t, x, model):
                     return model.predict(x[np.newaxis, :])[0] - x
+            case 'emt':
+                neural_dynamics = model_module.get_hybrid_dynamics()
 
     search_config['ude_rhs'] = args.ude_rhs
     search_config['recovered_dynamics'] = recovered_dynamics
@@ -227,6 +242,8 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
             search_config['t_ude_steps'] = [0.1, 0.05]
         case 'repressilator':
             search_config['t_ude_steps'] = [0.2, 0.1]
+        case 'emt':
+            search_config['t_ude_steps'] = [1.0, 0.5]
     search_config['learn_dx'] = True
     ude_learner = NeuralDynamicsLearner(
         search_config['train_samples'], output_dir, output_prefix)
@@ -268,7 +285,8 @@ def search_time_steps(search_config, ude_train_samples, verbose=False):
 
         # generate UDE dynamics with slightly different initial conditions
         # if all initial conditions are the same
-        if all(np.array_equal(x0_train[0], x0) for x0 in x0_train):
+        if search_config['noise_type'] != 'fixed' \
+                and all(np.array_equal(x0_train[0], x0) for x0 in x0_train):
             x0_base = x0_train[0]
             x0_train = []
             for _ in range(num_train_samples):
@@ -455,13 +473,13 @@ def get_args():
         description='Find the best ODE model that fits noisy data from the '
         'Lotka-Volterra model.')
     arg_parser.add_argument('--model', type=str, required=True,
-                            choices=['lotka_volterra', 'repressilator'],
+                            choices=['lotka_volterra', 'repressilator', 'emt'],
                             help='Dynamical model from which data is '
                             'generated')
     arg_parser.add_argument('--noise_type', type=str, required=True,
-                            choices=['additive', 'multiplicative'],
+                            choices=['fixed', 'additive', 'multiplicative'],
                             help='Type of noise added to data')
-    arg_parser.add_argument('--noise_level', type=float, required=True,
+    arg_parser.add_argument('--noise_level', type=float, default=0.01,
                             help='Noise level of training data')
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
@@ -541,7 +559,8 @@ def main():
     param_str = ', '.join(str(p) for p in params_true)
     print(f'- True parameter value: [{param_str}]', flush=True)
     print(f'- Noise type: {noise_type}', flush=True)
-    print(f'- Noise level: {noise_level}', flush=True)
+    if noise_type != 'fixed':
+        print(f'- Noise level: {noise_level}', flush=True)
     print(f'- RNG seed: {seed}', flush=True)
     print(f'- Data source: {data_source}', flush=True)
     t_span_str = ', '.join(str(t) for t in t_train_span)
