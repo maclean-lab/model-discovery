@@ -66,10 +66,20 @@ def get_full_learning_config(model_name, search_config):
         case 'emt':
             search_config['opt_threshold'] = 0.01
             search_config['basis_funcs'] = {
-                'default': PolynomialLibrary(degree=2),
+                'default': PolynomialLibrary(degree=3),
+                'no_bias': PolynomialLibrary(degree=3, include_bias=False),
+                'hill_max_3': [lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3),
+                               lambda x: x],
             }
             search_config['basis_exprs'] = {
                 'default': None,
+                'no_bias': None,
+                'hill_max_3': [lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)',
+                               lambda x: f'{x}'],
             }
 
 
