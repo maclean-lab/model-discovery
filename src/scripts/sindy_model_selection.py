@@ -64,7 +64,7 @@ def get_full_learning_config(model_name, search_config):
                                lambda x: f'/(1+{x}^4)']
             }
         case 'emt':
-            search_config['opt_threshold'] = 0.01
+            search_config['opt_threshold'] = 0.1
             search_config['basis_funcs'] = {
                 'default': PolynomialLibrary(degree=3),
                 'no_bias': PolynomialLibrary(degree=3, include_bias=False),
