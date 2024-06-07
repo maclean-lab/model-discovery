@@ -47,7 +47,8 @@ def get_args():
                             help='Number of neurons in each hidden layer of '
                             'the neural network')
     arg_parser.add_argument('--activation', type=str, default='tanh',
-                            choices=['tanh', 'relu', 'rbf'],
+                            choices=['tanh', 'relu', 'rbf', 'sigmoid',
+                                     'softplus', 'identity'],
                             help='Activation function for the neural network')
     arg_parser.add_argument('--learning_rates', nargs='+', type=float,
                             default=[1e-3, 1e-2, 1e-1],

@@ -549,7 +549,8 @@ def get_args():
                             help='Number of neurons in each hidden layer of '
                             'the neural network')
     arg_parser.add_argument('--activation', type=str, default='tanh',
-                            choices=['tanh', 'relu', 'rbf'],
+                            choices=['tanh', 'relu', 'rbf', 'sigmoid',
+                                     'softplus', 'identity'],
                             help='Activation function for the neural network')
     arg_parser.add_argument('--sindy_t_span', nargs=2, type=float,
                             default=[-np.inf, np.inf], metavar=('T0', 'T_END'),

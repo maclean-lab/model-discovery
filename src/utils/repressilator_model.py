@@ -5,7 +5,8 @@ import torch
 from torch import nn
 
 from dynamical_models import DynamicalModel
-from dynamical_models import NeuralDynamics, rbf_activation
+from dynamical_models import NeuralDynamics, rbf_activation, \
+    identity_activation
 
 
 class RepressilatorModel(DynamicalModel):
@@ -85,6 +86,8 @@ def get_neural_dynamics(
     """
     if activation == 'rbf':
         activation_func = rbf_activation
+    elif activation == 'identity':
+        activation_func = identity_activation
     else:
         activation_func = getattr(nn.functional, activation)
 
@@ -117,6 +120,8 @@ def get_hybrid_dynamics(
     """
     if activation == 'rbf':
         activation_func = rbf_activation
+    elif activation == 'identity':
+        activation_func = identity_activation
     else:
         activation_func = getattr(nn.functional, activation)
 

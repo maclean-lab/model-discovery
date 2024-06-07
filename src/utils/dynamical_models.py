@@ -436,6 +436,11 @@ class NeuralDynamics(nn.Module):
         return dx
 
 
+def identity_activation(x):
+    """Identity activation."""
+    return x
+
+
 def rbf_activation(x):
     """Radial basis function activation."""
     return torch.exp(-x * x)

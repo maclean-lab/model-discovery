@@ -7,7 +7,8 @@ import torch
 from torch import nn
 
 from time_series_data import TimeSeries
-from dynamical_models import DynamicalModel, NeuralDynamics, rbf_activation
+from dynamical_models import DynamicalModel, NeuralDynamics, rbf_activation, \
+    identity_activation
 
 
 class EmtModel(DynamicalModel):
@@ -223,6 +224,8 @@ def get_neural_dynamics(
     """
     if activation == 'rbf':
         activation_func = rbf_activation
+    elif activation == 'identity':
+        activation_func = identity_activation
     else:
         activation_func = getattr(nn.functional, activation)
 
@@ -260,6 +263,8 @@ def get_hybrid_dynamics(growth_rates: np.ndarray,
     """
     if activation == 'rbf':
         activation_func = rbf_activation
+    elif activation == 'identity':
+        activation_func = identity_activation
     else:
         activation_func = getattr(nn.functional, activation)
 

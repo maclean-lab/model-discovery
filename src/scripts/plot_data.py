@@ -111,7 +111,8 @@ def get_args():
                                 help='Number of neurons in each hidden layer '
                                 'of the neural network used by UDE')
         arg_parser.add_argument('--activation', type=str, default='tanh',
-                                choices=['tanh', 'relu', 'rbf'],
+                                choices=['tanh', 'relu', 'rbf', 'sigmoid',
+                                         'softplus', 'identity'],
                                 help='Activation function for the neural '
                                 'network used by UDE')
         arg_parser.add_argument('--ude_learning_rate', type=float,
