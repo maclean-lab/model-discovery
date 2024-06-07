@@ -166,7 +166,8 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
         Returns:
             list of time series as evaluation data.
         """
-        if [t_eval, x0_eval].count(None) == 1:
+        if t_eval is None and x0_eval is not None \
+                or t_eval is not None and x0_eval is None:
             msg = 'only one of t_eval and x0_eval provided; both ' + \
                 'required if one of them is given'
             raise ValueError(msg)
@@ -1045,11 +1046,10 @@ class NeuralDynamicsLearner(NeuralTimeSeriesLearner):
                 evaluate. If set to `None`, the training data will be used.
                 Default is `None`.
             t_eval (np.ndarray | list[np.ndarray] | None): time points of
-                evaluation data. Only used if method is `autoregressive`. If
-                given, `x0_eval` must also be given. Default is `None`.
+                evaluation data. If given, `x0_eval` must also be given.
+                Default is `None`.
             x0_eval (np.ndarray | list[np.ndarray] | None): initial conditions
-                of evaluation data. Only used if method is `autoregressive`. If
-                given, `t_eval` must also be given. Default is `None`.
+                of evaluation data. If given, `t_eval` must also be given.
             ref_data (list[TimeSeries] | None): list of reference time series
                 to be used for evaluating performance metrics. Default is
                 `None`.
@@ -1370,11 +1370,11 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                 evaluate. If set to `None`, the training data will be used.
                 Default is `None`.
             t_eval (np.ndarray | list[np.ndarray] | None): time points of
-                evaluation data. Only used if method is `autoregressive`. If
-                given, `x0_eval` must also be given. Default is `None`.
+                evaluation data. If given, `x0_eval` must also be given.
+                Default is `None`.
             x0_eval (np.ndarray | list[np.ndarray] | None): initial conditions
-                of evaluation data. Only used if method is `autoregressive`. If
-                given, `t_eval` must also be given. Default is `None`.
+                of evaluation data. If given, `t_eval` must also be given.
+                Default is `None`.
             ref_data (list[TimeSeries] | None): list of reference time series
                 to be used for evaluating performance metrics. Default is
                 `None`.
@@ -1417,12 +1417,33 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
                    integrator_kwargs)
 
         self._is_evaluated = True
-        self._eval_metrics.update(self._get_mse(self._pred_data, ref_data))
-        self._eval_metrics.update(self._get_aicc(self._pred_data, ref_data))
 
+        # _get_mse() and _get_aicc() computes metrics between predicted and
+        # reference data but do not know whether the prediction is successful
+        # or not, so unsuccessful predictions will be set to None for
+        # _get_mse() and _get_aicc()
+        pred_data_for_metrics = []
         for ts_eval, ts_pred in zip(self._eval_data, self._pred_data):
+            # evaluation is successful only if the time points match
             if ts_pred is not None and np.array_equal(ts_eval.t, ts_pred.t):
+                pred_data_for_metrics.append(ts_pred)
                 num_successes += 1
+            else:
+                pred_data_for_metrics.append(None)
+
+        if num_successes > 0:
+            self._eval_metrics.update(
+                self._get_mse(pred_data_for_metrics, ref_data))
+            self._eval_metrics.update(
+                self._get_aicc(pred_data_for_metrics, ref_data))
+        else:
+            self._eval_metrics['indiv_mse'] = np.full(self._num_vars,
+                                                      np.nan)
+            self._eval_metrics['mse'] = np.nan
+            self._eval_metrics['indiv_aicc'] = np.full(self._num_vars,
+                                                       np.nan)
+            self._eval_metrics['aicc'] = np.nan
+
         self._eval_metrics['success_rate'] = num_successes / num_eval_samples
 
         if verbose:
@@ -1520,6 +1541,8 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
             aic = m * np.log(np.mean(rss) / m) + 2 * k
             if k == 0:
                 correction = 0
+            elif m - k - 2 <= 0:
+                correction = np.inf
             else:
                 correction = 2 * (k + 1) * (k + 2) / (m - k - 2)
             metrics['indiv_aicc'] = indiv_aic + correction

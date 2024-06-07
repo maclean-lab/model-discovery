@@ -88,7 +88,7 @@ for i in range(num_vars):
     plt.plot(t_true_long, x_true_long[:, i], marker='o', linestyle='',
              color=true_data_colors[i], alpha=0.3)
     plt.plot(t_true_long, x_true_pred[:, i], color=true_data_colors[i])
-plt.axvline(t_span[1], color='r')
+plt.axvline(t_span[1], color='k', linestyle='--')
 figure_path = os.path.join(output_dir, 'true_data_pred_data.pdf')
 plt.savefig(figure_path)
 plt.close()
@@ -113,7 +113,7 @@ for i in range(num_vars):
     plt.plot(t_true_long, x_true_long[:, i], marker='o', linestyle='',
              color=true_data_colors[i], alpha=0.3)
     plt.plot(t_true_long, x_true_pred[:, i], color=true_data_colors[i])
-plt.axvline(t_span[1], color='r')
+plt.axvline(t_span[1], color='k', linestyle='--')
 figure_path = os.path.join(output_dir, 'true_derivatives_pred_data.pdf')
 plt.savefig(figure_path)
 plt.close()
@@ -137,7 +137,7 @@ for i in range(num_vars):
     plt.plot(t_true_long, x_true_long[:, i], marker='o', linestyle='',
              color=true_data_colors[i], alpha=0.3)
     plt.plot(t_true_long, x_true_pred[:, i], color=true_data_colors[i])
-plt.axvline(t_span[1], color='r')
+plt.axvline(t_span[1], color='k', linestyle='--')
 figure_path = os.path.join(output_dir, 'true_missing_pred_data.pdf')
 plt.savefig(figure_path)
 plt.close()

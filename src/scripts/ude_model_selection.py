@@ -232,7 +232,11 @@ def main():
                         num_hidden_neurons=args.num_hidden_neurons,
                         activation=args.activation)
                 case 'emt':
-                    neural_dynamics = model_module.get_hybrid_dynamics()
+                    growth_rates = np.array([-0.5, -0.15, -0.1])
+                    neural_dynamics = model_module.get_hybrid_dynamics(
+                        growth_rates,
+                        num_hidden_neurons=args.num_hidden_neurons,
+                        activation=args.activation)
         output_prefix = f'lr_{lr:.3f}_window_size_{ws:02d}_batch_size_{bs:02d}'
         ts_learner = NeuralDynamicsLearner(train_samples, output_dir,
                                            output_prefix)

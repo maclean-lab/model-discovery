@@ -57,8 +57,8 @@ class HybridDynamics(nn.Module):
         self.latent = latent_dynamics
 
     def forward(self, t, x):
-        latent_dx = self.latent(t, x)
         known_dx = self.growth_rates * x
+        latent_dx = self.latent(t, x)
 
         return known_dx + latent_dx
 

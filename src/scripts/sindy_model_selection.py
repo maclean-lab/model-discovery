@@ -17,7 +17,7 @@ from model_helpers import get_model_module, get_data_path, \
     get_model_selection_dir, print_hrule
 
 
-def get_full_learning_config(model_name, search_config):
+def get_latent_learning_config(model_name, search_config):
     match model_name:
         case 'lotka_volterra':
             search_config['opt_threshold'] = 0.1
@@ -66,8 +66,11 @@ def get_full_learning_config(model_name, search_config):
         case 'emt':
             search_config['opt_threshold'] = 0.1
             search_config['basis_funcs'] = {
-                'default': PolynomialLibrary(degree=3),
-                'no_bias': PolynomialLibrary(degree=3, include_bias=False),
+                'default': PolynomialLibrary(degree=2),
+                'no_bias': PolynomialLibrary(degree=2, include_bias=False),
+                'hill_1': [lambda x: 1.0 / (1.0 + x), lambda x: x],
+                'hill_2': [lambda x: 1.0 / (1.0 + x ** 2), lambda x: x],
+                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3), lambda x: x],
                 'hill_max_3': [lambda x: 1.0 / (1.0 + x),
                                lambda x: 1.0 / (1.0 + x ** 2),
                                lambda x: 1.0 / (1.0 + x ** 3),
@@ -76,6 +79,9 @@ def get_full_learning_config(model_name, search_config):
             search_config['basis_exprs'] = {
                 'default': None,
                 'no_bias': None,
+                'hill_1': [lambda x: f'/(1+{x})', lambda x: f'{x}'],
+                'hill_2': [lambda x: f'/(1+{x}^2)', lambda x: f'{x}'],
+                'hill_3': [lambda x: f'/(1+{x}^3)', lambda x: f'{x}'],
                 'hill_max_3': [lambda x: f'/(1+{x})',
                                lambda x: f'/(1+{x}^2)',
                                lambda x: f'/(1+{x}^3)',
@@ -83,7 +89,7 @@ def get_full_learning_config(model_name, search_config):
             }
 
 
-def get_latent_learning_config(model_name, search_config):
+def get_full_learning_config(model_name, search_config):
     match model_name:
         case 'lotka_volterra':
             search_config['opt_threshold'] = 0.1
@@ -128,8 +134,29 @@ def get_latent_learning_config(model_name, search_config):
                                lambda x: f'/(1+{x}^4)']
             }
         case 'emt':
-            raise ValueError('Latent learning is not supported for the EMT '
-                             'model')
+            search_config['opt_threshold'] = 0.1
+            search_config['basis_funcs'] = {
+                'default': PolynomialLibrary(degree=2),
+                'no_bias': PolynomialLibrary(degree=2, include_bias=False),
+                'hill_1': [lambda x: 1.0 / (1.0 + x), lambda x: x],
+                'hill_2': [lambda x: 1.0 / (1.0 + x ** 2), lambda x: x],
+                'hill_3': [lambda x: 1.0 / (1.0 + x ** 3), lambda x: x],
+                'hill_max_3': [lambda x: 1.0 / (1.0 + x),
+                               lambda x: 1.0 / (1.0 + x ** 2),
+                               lambda x: 1.0 / (1.0 + x ** 3),
+                               lambda x: x],
+            }
+            search_config['basis_exprs'] = {
+                'default': None,
+                'no_bias': None,
+                'hill_1': [lambda x: f'/(1+{x})', lambda x: f'{x}'],
+                'hill_2': [lambda x: f'/(1+{x}^2)', lambda x: f'{x}'],
+                'hill_3': [lambda x: f'/(1+{x}^3)', lambda x: f'{x}'],
+                'hill_max_3': [lambda x: f'/(1+{x})',
+                               lambda x: f'/(1+{x}^2)',
+                               lambda x: f'/(1+{x}^3)',
+                               lambda x: f'{x}'],
+            }
 
 
 def recover_from_data(args, search_config, verbose) -> bool:
@@ -467,10 +494,24 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
                               'method': 'LSODA',
                               'events': stop_events,
                               'min_step': 1e-8}
-    eq_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
-                    integrator_kwargs=eval_integrator_kwargs,
-                    verbose=verbose)
-    eq_learner.plot_pred_data(output_suffix='pred_data_long')
+    if search_config['model'] == 'emt':
+        # evaluate EMT model on denser time points
+        test_samples = [ts[1:] for ts in test_samples]
+        t_test = test_samples[0].t
+        # use time points that are powers of 2 to avoid numerical issues
+        t_eval = np.arange(t_test[0], t_test[-1] + 1e-8, 2 ** -4)
+        x0_eval = [ts.x[0, :] for ts in test_samples]
+        eq_learner.eval(t_eval=t_eval, x0_eval=x0_eval, ref_data=test_samples,
+                        eval_func=recovered_dynamics,
+                        integrator_kwargs=eval_integrator_kwargs,
+                        verbose=verbose)
+        eq_learner.plot_pred_data(ref_data=test_samples,
+                                  output_suffix='pred_data_long')
+    else:
+        eq_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
+                        integrator_kwargs=eval_integrator_kwargs,
+                        verbose=verbose)
+        eq_learner.plot_pred_data(output_suffix='pred_data_long')
     print('Saved plots of dynamics predicted by the learned SINDy model',
           flush=True)
 
@@ -581,6 +622,7 @@ def main():
 
     # set up model selection
     search_config = {}
+    search_config['model'] = args.model
     search_config['noise_type'] = noise_type
     search_config['noise_level'] = noise_level
     search_config['t_train_span'] = t_train_span
@@ -597,8 +639,12 @@ def main():
     search_config['sindy_optimizer_args'] = {
         'stlsq': {'alpha': [0.05, 0.1, 0.5, 1.0, 5.0, 10.0]}}
     search_config['rng'] = default_rng(seed)
-    search_config['stop_events'] = [get_lower_bound_checker(-10.0),
-                                    get_upper_bound_checker(20.0)]
+    if args.model == 'emt':
+        search_config['stop_events'] = [get_lower_bound_checker(-0.25),
+                                        get_upper_bound_checker(1.25)]
+    else:
+        search_config['stop_events'] = [get_lower_bound_checker(-10.0),
+                                        get_upper_bound_checker(20.0)]
     for event in search_config['stop_events']:
         event.terminal = True
 

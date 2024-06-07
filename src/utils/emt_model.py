@@ -189,6 +189,21 @@ class EmtModel(DynamicalModel):
         return x
 
 
+class HybridDynamics(nn.Module):
+    """PyTorch module combining the known and latent derivatives."""
+    def __init__(self, growth_rates, latent_dynamics, dtype=torch.float32):
+        super().__init__()
+
+        self.growth_rates = torch.tensor(growth_rates, dtype=dtype)
+        self.latent = latent_dynamics
+
+    def forward(self, t, x):
+        known_dx = self.growth_rates * x
+        latent_dx = self.latent(t, x)
+
+        return known_dx + latent_dx
+
+
 def get_neural_dynamics(
         num_hidden_neurons: list[int] | None = None, activation: str = 'tanh',
         compile_model: bool = False) -> nn.Module:
@@ -222,6 +237,38 @@ def get_neural_dynamics(
     return neural_dynamics
 
 
-def get_hybrid_dynamics(*args, **kwargs):
-    raise NotImplementedError(
-        'Hybrid dynamics for the EMT model is not implemented')
+def get_hybrid_dynamics(growth_rates: np.ndarray,
+                        num_hidden_neurons: list[int] | None = None,
+                        activation: str = 'tanh', compile_model: bool = False,
+                        dtype=torch.float32) -> nn.Module:
+    """Return the hybrid dynamics for the EMT model.
+
+    Args:
+        growth_rates (np.ndarray): growth rates of the EMT model. Expect 3
+            elements.
+        num_hidden_neurons (list[int]): number of neurons in each hidden layer
+            of the latent dynamics. If None, then this will be set to [8, 8].
+            Default is None.
+        activation (str): activation function to use in the latent dynamics.
+            Can be either `rbf` for custom radial basis function, or any of the
+            activation functions in `torch.nn.functional`. Default is `tanh`.
+        compile (bool): whether to compile the model. Default is False.
+        dtype (torch.dtype): data type of the model. Default is torch.float32.
+
+    Returns:
+        nn.Module: hybrid dynamics for the EMT model.
+    """
+    if activation == 'rbf':
+        activation_func = rbf_activation
+    else:
+        activation_func = getattr(nn.functional, activation)
+
+    if num_hidden_neurons is None:
+        num_hidden_neurons = [8, 8]
+    latent_dynamics = NeuralDynamics(3, num_hidden_neurons, activation_func)
+    hybrid_dynamics = HybridDynamics(growth_rates, latent_dynamics, dtype)
+
+    if compile_model:
+        hybrid_dynamics = torch.compile(hybrid_dynamics)
+
+    return hybrid_dynamics
