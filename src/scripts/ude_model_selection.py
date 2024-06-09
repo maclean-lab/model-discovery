@@ -273,7 +273,7 @@ def main():
                 t_train = train_samples[0].t
                 t_eval = np.arange(t_train[0], t_train[-1], 2 ** -4)
                 x0_eval = [ts.x[0] for ts in train_samples]
-                ts_learner.eval(t_eval=t_eval, x0=x0_eval,
+                ts_learner.eval(t_eval=t_eval, x0_eval=x0_eval,
                                 integrator_backend='scipy',
                                 integrator_kwargs={'method': 'LSODA'},
                                 show_progress=False)
