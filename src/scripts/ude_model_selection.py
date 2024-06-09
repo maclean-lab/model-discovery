@@ -277,12 +277,13 @@ def main():
                                 integrator_backend='scipy',
                                 integrator_kwargs={'method': 'LSODA'},
                                 show_progress=False)
+                ts_learner.plot_pred_data(ref_data=train_samples)
             else:
                 ts_learner.eval(eval_data=train_samples,
                                 integrator_backend='scipy',
                                 integrator_kwargs={'method': 'LSODA'},
                                 show_progress=False)
-            ts_learner.plot_pred_data()
+                ts_learner.plot_pred_data()
             print('Saved plots of dynamics predicted by the best model',
                   flush=True)
         else:
