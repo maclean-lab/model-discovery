@@ -269,10 +269,19 @@ def main():
             # evaluate the best model on training data
             best_epoch_model_suffix = f'model_state_epoch_{best_epoch:03d}'
             ts_learner.load_model(neural_dynamics, best_epoch_model_suffix)
-            ts_learner.eval(eval_data=train_samples,
-                            integrator_backend='scipy',
-                            integrator_kwargs={'method': 'LSODA'},
-                            show_progress=False)
+            if args.model == 'emt':
+                t_train = train_samples[0].t
+                t_eval = np.arange(t_train[0], t_train[-1], 2 ** -4)
+                x0_eval = [ts.x[0] for ts in train_samples]
+                ts_learner.eval(t_eval=t_eval, x0=x0_eval,
+                                integrator_backend='scipy',
+                                integrator_kwargs={'method': 'LSODA'},
+                                show_progress=False)
+            else:
+                ts_learner.eval(eval_data=train_samples,
+                                integrator_backend='scipy',
+                                integrator_kwargs={'method': 'LSODA'},
+                                show_progress=False)
             ts_learner.plot_pred_data()
             print('Saved plots of dynamics predicted by the best model',
                   flush=True)
