@@ -233,7 +233,7 @@ def main():
                         num_hidden_neurons=args.num_hidden_neurons,
                         activation=args.activation)
                 case 'emt':
-                    growth_rates = np.array([-0.5, -0.15, -0.1])
+                    growth_rates = np.array([-1.0, -1.0, -1.0])
                     neural_dynamics = model_module.get_hybrid_dynamics(
                         growth_rates,
                         num_hidden_neurons=args.num_hidden_neurons,
