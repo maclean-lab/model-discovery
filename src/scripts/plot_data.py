@@ -456,8 +456,20 @@ def plot_sindy_data(args):
                          'method': 'LSODA',
                          'events': stop_events,
                          'min_step': 1e-8}
-    ode_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
-                     integrator_kwargs=integrator_kwargs, verbose=verbose)
+    if args.model == 'emt':
+        # evaluate EMT model on denser time points
+        test_samples = [ts[1:] for ts in test_samples]
+        t_test = test_samples[0].t
+        # use time points that are powers of 2 to avoid numerical issues
+        t_eval = np.arange(t_test[0], t_test[-1] + 1e-8, 2 ** -3)
+        x0_eval = [ts.x[0, :] for ts in test_samples]
+        ode_learner.eval(t_eval=t_eval, x0_eval=x0_eval, ref_data=test_samples,
+                         eval_func=recovered_dynamics,
+                         integrator_kwargs=integrator_kwargs,
+                         verbose=verbose)
+    else:
+        ode_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
+                         integrator_kwargs=integrator_kwargs, verbose=verbose)
 
     # plot SINDy-predicted data vs test data
     figure_dir = get_figure_dir(args.model)
