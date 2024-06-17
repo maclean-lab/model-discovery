@@ -294,7 +294,14 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
                 def recovered_dynamics(t, x, model):
                     return model.predict(x[np.newaxis, :])[0] - x
             case 'emt':
-                neural_dynamics = model_module.get_hybrid_dynamics()
+                growth_rates = np.array([-1.0, -1.0, -1.0])
+                neural_dynamics = model_module.get_hybrid_dynamics(
+                    growth_rates, num_hidden_neurons=num_hidden_neurons,
+                    activation=activation)
+
+                def recovered_dynamics(t, x, model):
+                    return growth_rates * x + model.predict(
+                        x[np.newaxis, :])[0]
 
     search_config['ude_rhs'] = args.ude_rhs
     search_config['recovered_dynamics'] = recovered_dynamics

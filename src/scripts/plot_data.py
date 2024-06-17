@@ -223,7 +223,7 @@ def plot_noisy_data(args):
     plt.close('all')
 
 
-def plot_sindy_dx(args):
+def plot_finite_difference_dx(args):
     # unpack arguments
     noise_type = args.noise_type
     noise_level = args.noise_level
@@ -282,8 +282,7 @@ def plot_ude_data(args):
     ude_rhs = args.ude_rhs
     num_hidden_neurons = args.num_hidden_neurons
     activation = args.activation
-    # for now, plotting dx for EMT model is not supported
-    plot_dx = args.plot_dx and args.model != 'emt'
+    plot_dx = args.plot_dx
 
     data_path = get_data_path(args.model, noise_type, noise_level, seed,
                               data_source)
@@ -307,7 +306,7 @@ def plot_ude_data(args):
         hyperparams = None
 
     # get true derivative data
-    if plot_dx:
+    if plot_dx and args.model != 'emt':
         get_true_dx(args, params_true, x0, train_samples, ude_rhs=ude_rhs)
 
     # get predicted data from trained UDE model
@@ -341,14 +340,17 @@ def plot_ude_data(args):
             plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
             for i in range(num_vars):
                 if plot_dx:
-                    y_train = ts_train.dx[:, i]
+                    if args.model != 'emt':
+                        y_train = ts_train.dx[:, i]
                     y_pred = ts_pred.dx[:, i]
                 else:
                     y_train = ts_train.x[:, i]
                     y_pred = ts_pred.x[:, i]
 
-                plt.plot(ts_train.t, y_train, marker='o', linestyle='none',
-                         color=data_colors[i], alpha=0.3, label=data_labels[i])
+                if args.model != 'emt':
+                    plt.plot(ts_train.t, y_train, marker='o', linestyle='none',
+                             color=data_colors[i], alpha=0.3,
+                             label=data_labels[i])
                 plt.plot(ts_pred.t, y_pred, color=data_colors[i],
                          label=data_labels[i])
             plt.xlabel(args.x_label)
@@ -650,7 +652,7 @@ def main():
         elif args.ude_rhs != 'none':
             plot_ude_data(args)
         elif args.plot_dx:
-            plot_sindy_dx(args)
+            plot_finite_difference_dx(args)
         else:
             plot_noisy_data(args)
 
