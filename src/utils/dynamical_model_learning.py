@@ -1338,10 +1338,34 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
 
             valid_pred_data = []
             self._eval(self._valid_data, valid_pred_data, **valid_kwargs)
-            self._valid_metrics.update(
-                self._get_mse(valid_pred_data, valid_data))
-            self._valid_metrics.update(
-                self._get_aicc(valid_pred_data, valid_data))
+
+            # _get_mse() and _get_aicc() computes metrics between predicted and
+            # reference data but do not know whether the prediction is
+            # successful or not, so unsuccessful predictions will be set to
+            # None for _get_mse() and _get_aicc()
+            valid_pred_data_for_metrics = []
+            num_successes = 0
+            for ts_valid, ts_pred in zip(self._valid_data, valid_pred_data):
+                # evaluation is successful only if the time points match
+                if ts_pred is not None \
+                        and np.array_equal(ts_valid.t, ts_pred.t):
+                    valid_pred_data_for_metrics.append(ts_pred)
+                    num_successes += 1
+                else:
+                    valid_pred_data_for_metrics.append(None)
+
+            if num_successes > 0:
+                self._valid_metrics.update(
+                    self._get_mse(valid_pred_data, valid_data))
+                self._valid_metrics.update(
+                    self._get_aicc(valid_pred_data, valid_data))
+            else:
+                self._valid_metrics['indiv_mse'] = np.full(self._num_vars,
+                                                           np.nan)
+                self._valid_metrics['mse'] = np.nan
+                self._valid_metrics['indiv_aicc'] = np.full(self._num_vars,
+                                                            np.nan)
+                self._valid_metrics['aicc'] = np.nan
 
         if verbose:
             print('Learned ODEs:', flush=True)
@@ -1409,10 +1433,6 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
 
         if ref_data is None:
             ref_data = eval_data
-        self._eval_metrics = {}
-
-        num_successes = 0
-
         self._eval(self._eval_data, self._pred_data, eval_func,
                    integrator_kwargs)
 
@@ -1422,7 +1442,10 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         # reference data but do not know whether the prediction is successful
         # or not, so unsuccessful predictions will be set to None for
         # _get_mse() and _get_aicc()
+        self._eval_metrics = {}
         pred_data_for_metrics = []
+        num_successes = 0
+
         for ts_eval, ts_pred in zip(self._eval_data, self._pred_data):
             # evaluation is successful only if the time points match
             if ts_pred is not None and np.array_equal(ts_eval.t, ts_pred.t):
