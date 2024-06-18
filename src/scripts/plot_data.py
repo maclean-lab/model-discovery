@@ -137,6 +137,9 @@ def get_args():
                                 help='Time span of SINDy training data')
         arg_parser.add_argument('--sindy_basis', type=str, default='default',
                                 help='Basis functions used by SINDy')
+        arg_parser.add_argument('--plot_interactions', action='store_true',
+                                help='Whether to plot interactions betwwen '
+                                'variables in SINDy model')
 
     return arg_parser.parse_args()
 
@@ -372,6 +375,7 @@ def plot_sindy_data(args):
     basis_name = args.sindy_basis
     optimizer_name = args.sindy_optimizer
     threshold = args.sindy_opt_threshold
+    plot_interactions = args.plot_interactions
     verbose = True
 
     # load data
@@ -430,7 +434,12 @@ def plot_sindy_data(args):
             case 'repressilator':
                 def recovered_dynamics(t, x, model):
                     return model.predict(x[np.newaxis, :])[0] - x
+            case 'emt':
+                growth_rates = np.array([-1.0, -1.0, -1.0])
 
+                def recovered_dynamics(t, x, model):
+                    return growth_rates * x + model.predict(
+                        x[np.newaxis, :])[0]
     else:  # ude_rhs in {'none', 'nn'}
         get_full_learning_config(args.model, sindy_search_config)
 
@@ -473,7 +482,7 @@ def plot_sindy_data(args):
         ode_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
                          integrator_kwargs=integrator_kwargs, verbose=verbose)
 
-    # plot SINDy-predicted data vs test data
+    # plot SINDy-predicted data (vs test data)
     figure_dir = get_figure_dir(args.model)
     sindy_model_alias = f't_step_{t_step:.02f}_pysindy_basis_{basis_name}' \
         f'_unnormalized_opt_{optimizer_name}'
@@ -483,29 +492,87 @@ def plot_sindy_data(args):
         else:
             sindy_model_alias += f'_{arg_name}_{arg_val}'
     figure_path = f'{noise_type}_noise_{noise_level:.03f}_seed_{seed:04d}' \
-        f'_{data_source}_{prior_step_alias}_{sindy_model_alias}_pred_data.pdf'
+        f'_{data_source}_{prior_step_alias}_{sindy_model_alias}'
+    if plot_interactions:
+        figure_path += '_interactions.pdf'
+    else:
+        figure_path += '_pred_data.pdf'
     figure_path = os.path.join(figure_dir, figure_path)
     model_class = get_model_class(args.model)
     num_vars = model_class.get_num_variables()
     data_colors = get_data_colors(num_vars)
     data_labels = model_class.get_variable_names()
     with PdfPages(figure_path) as pdf:
-        for ts_pred, ts_test in zip(ode_learner.pred_data, test_samples):
-            plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
+        if plot_interactions:
+            sindy_basis_funcs = ode_learner.model.feature_library
+            sindy_basis_names = sindy_basis_funcs.get_feature_names()
+            # basis_coeffs.shape = (num_vars, num_basis_funcs)
+            basis_coeffs = ode_learner.model.coefficients()
+            # whether a basis function involves variable j, e.g.
+            # var_masks[0][2] == 1 means that basis function 2 involves x_0
+            # var_masks[j].shape = (num_basis_funcs, )
+            var_masks = [
+                (np.char.find(sindy_basis_names, f'x{j}') >= 0).astype(int)
+                for j in range(num_vars)]
+            # masked_basis_coeffs[i]: nonzero coefficients for each x_j's
+            # contribution to x_i, i.e. masked_basis_coeffs[i][k, j] is not 0
+            # if x_j appears in the basis function at index k
+            # masked_basis_coeffs[i].shape = (num_basis_funcs, num_vars)
+            masked_basis_coeffs = []
             for i in range(num_vars):
-                plt.plot(ts_test.t, ts_test.x[:, i], marker='o', markersize=5,
-                         linestyle='none', color=data_colors[i], alpha=0.3,
-                         label=data_labels[i])
-                plt.plot(ts_pred.t, ts_pred.x[:, i], color=data_colors[i],
-                         label=data_labels[i])
-            # add a vertical line to indicate the end of training data
-            plt.axvline(t_train_span[1], color='k', linestyle='--')
-            plt.xlabel(args.x_label)
-            plt.xlabel(args.y_label)
-            if args.legend:
-                plt.legend()
-            pdf.savefig(transparent=True)
-            plt.close('all')
+                coeffs = np.array(
+                    [masks * basis_coeffs[i, :] for masks in var_masks])
+                masked_basis_coeffs.append(coeffs.T)
+
+        for ts_pred, ts_test in zip(ode_learner.pred_data, test_samples):
+            # plot for each sample
+            if plot_interactions:
+                # plot contribution of each x_j to x_i
+                # will add num_vars pages to the pdf, one var (x_i) per page
+                # fitted_bases.shape = (num_time_points, num_basis_funcs)
+                fitted_bases = sindy_basis_funcs.fit_transform(ts_pred.x)
+
+                # plot contribution of each x_j to x_i
+                for i in range(num_vars):
+                    plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
+
+                    # dx_pred[:, j] = x_j's contribution to x_i over time
+                    # dx_pred.shape = (num_time_points, num_vars)
+                    dx_pred = fitted_bases @ masked_basis_coeffs[i]
+                    if ude_rhs == 'hybrid' \
+                            and args.model in ('lotka_volterra', 'emt'):
+                        dx_pred[:, i] += growth_rates[i] * ts_pred.x[:, i]
+
+                    for j in range(num_vars):
+                        plt.plot(ts_pred.t, dx_pred[:, j],
+                                 color=data_colors[j], label=data_labels[j])
+
+                    # add a vertical line to indicate the end of training data
+                    plt.axvline(t_train_span[1], color='k', linestyle='--')
+                    plt.xlabel(args.x_label)
+                    plt.xlabel(args.y_label)
+                    if args.legend:
+                        plt.legend()
+                    pdf.savefig(transparent=True)
+                    plt.close('all')
+            else:
+                # plot SINDy predicted data
+                plt.figure(figsize=args.figure_size, dpi=args.figure_dpi)
+                for i in range(num_vars):
+                    plt.plot(ts_test.t, ts_test.x[:, i], marker='o',
+                             markersize=5, linestyle='none',
+                             color=data_colors[i], alpha=0.3,
+                             label=data_labels[i])
+                    plt.plot(ts_pred.t, ts_pred.x[:, i], color=data_colors[i],
+                             label=data_labels[i])
+                # add a vertical line to indicate the end of training data
+                plt.axvline(t_train_span[1], color='k', linestyle='--')
+                plt.xlabel(args.x_label)
+                plt.xlabel(args.y_label)
+                if args.legend:
+                    plt.legend()
+                pdf.savefig(transparent=True)
+                plt.close('all')
 
 
 def get_true_dx(args, params_true, x0, samples, ude_rhs='none'):
@@ -554,6 +621,11 @@ def simulate_ude_model(samples, t_step, args, params_true=None,
             case 'repressilator':
                 neural_dynamics = model_module.get_hybrid_dynamics(
                     num_hidden_neurons=num_hidden_neurons,
+                    activation=activation)
+            case 'emt':
+                growth_rates = np.array([-1.0, -1.0, -1.0])
+                neural_dynamics = model_module.get_hybrid_dynamics(
+                    growth_rates, num_hidden_neurons=num_hidden_neurons,
                     activation=activation)
 
     t_eval = [np.arange(ts.t[0], ts.t[-1] + t_step * 1e-3, t_step)
