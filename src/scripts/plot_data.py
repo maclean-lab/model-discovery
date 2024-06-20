@@ -210,7 +210,7 @@ def plot_noisy_data(args):
         case 'strip':
             g = sns.stripplot(
                 data=long_data, x='Time', y='Value', hue='Variable',
-                palette=data_colors, jitter=True, dodge=True, size=1.0,
+                palette=data_colors, jitter=True, dodge=True, size=3.0,
                 alpha=0.5, legend=args.legend)
     if args.model == 'emt':
         xticks = g.get_xticks()
