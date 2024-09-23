@@ -13,7 +13,7 @@ class RepressilatorModel(DynamicalModel):
     _NUM_VARIABLES = 3
     _VARIABLE_NAMES = ['Gene 1', 'Gene 2', 'Gene 3']
     _PARAM_NAMES = ['beta', 'n']
-    _DEFAULT_PARAM_VALUES = np.array([10.0, 3])
+    _DEFAULT_PARAM_VALUES = np.array([10.0, 3, 10.0, 3, 10.0, 3])
     _DEFAULT_X0 = np.array([1.0, 1.0, 1.2])
     _DEFAULT_T_STEP = 0.2
     _DEFAULT_T = np.arange(0.0, 10.0 + 1e-8, _DEFAULT_T_STEP)
@@ -30,7 +30,7 @@ class RepressilatorModel(DynamicalModel):
         Args:
             param_values (np.ndarray | None, optional): values of model
                 parameters, namely beta and n. Defaults parameter values are
-                beta = 10.0, n = 3.
+                beta = 10.0 and n = 3 for all genes.
             x0 (np.ndarray | None, optional): initial conditions. Defaults to
                 None, in which case it is set to [1.0, 1.0, 1.2].
             t (np.ndarray | None, optional): time points. Defaults to None, in
@@ -46,8 +46,8 @@ class RepressilatorModel(DynamicalModel):
             dx = np.empty(3)
 
             dx[0] = p[0] / (1 + x[2] ** p[1]) - x[0]
-            dx[1] = p[0] / (1 + x[0] ** p[1]) - x[1]
-            dx[2] = p[0] / (1 + x[1] ** p[1]) - x[2]
+            dx[1] = p[2] / (1 + x[0] ** p[3]) - x[1]
+            dx[2] = p[4] / (1 + x[1] ** p[5]) - x[2]
 
             return dx
 
