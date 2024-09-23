@@ -104,6 +104,10 @@ def get_args():
                             default=default_t_step, metavar='T_STEP',
                             help='Time step of test data')
 
+    # output file related arguments
+    arg_parser.add_argument('--output_suffix', type=str, default='',
+                            help='Suffix to append to output file name')
+
     return arg_parser.parse_args()
 
 
@@ -150,9 +154,12 @@ def main():
         output_path += f'_{noise_level:.03f}'
     output_path += f'_seed_{seed:04d}'
     if args.clean_x0:
-        output_path += '_clean_x0.h5'
+        output_path += '_clean_x0'
     else:
-        output_path += '_raw.h5'
+        output_path += '_raw'
+    if args.output_suffix:
+        output_path += f'_{args.output_suffix}'
+    output_path += '.h5'
     output_path = os.path.join(output_dir, output_path)
 
     with h5py.File(output_path, 'w') as fd:
