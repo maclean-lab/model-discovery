@@ -33,7 +33,7 @@ def get_args():
     arg_parser.add_argument('--seed', type=int, default=2023,
                             help='Random seed of generated data')
     arg_parser.add_argument('--data_source', type=str, required=True,
-                            choices=['raw', 'clean_x0'],
+                            choices=['raw', 'raw_alt_params', 'clean_x0'],
                             help='Source of training data')
     arg_parser.add_argument('--data_preprocessor', type=str, default='none',
                             help='Preprocessing method for training data')
