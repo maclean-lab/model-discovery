@@ -35,3 +35,5 @@ echo "Generating data for EMT model..."
 python src/scripts/generate_data.py \
     --model emt --noise_type fixed --t_train_span 1 9 --t_valid_span 1 9 \
     --t_test_span 0 13
+
+echo "Done."
