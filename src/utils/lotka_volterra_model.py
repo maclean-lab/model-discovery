@@ -91,12 +91,12 @@ def get_neural_dynamics(
     if num_hidden_neurons is None:
         num_hidden_neurons = [5, 5]
 
-    nerual_dynamics = NeuralDynamics(2, num_hidden_neurons, activation_func)
+    neural_dynamics = NeuralDynamics(2, num_hidden_neurons, activation_func)
 
     if compile_model:
-        nerual_dynamics = torch.compile(nerual_dynamics)
+        neural_dynamics = torch.compile(neural_dynamics)
 
-    return nerual_dynamics
+    return neural_dynamics
 
 
 def get_hybrid_dynamics(
