@@ -143,6 +143,28 @@ class TimeSeries:
         return TimeSeries(self._t.copy(), self._x.copy(), self._dx.copy())
 
 
+def get_time_series_segment(ts: TimeSeries, start: float, end: float
+                            ) -> TimeSeries | None:
+    """Return a segment of a time series between two time points, inclusive.
+
+    Args:
+        ts (TimeSeries): time series.
+        start (float): start time point.
+        end (float): end time point.
+
+    Returns:
+        TimeSeries | None: segment of the time series. If the time series does
+            not have any time points between the two time points, None is
+            returned.
+    """
+    t_indices = np.where((ts.t >= start) & (ts.t <= end))[0]
+
+    if t_indices.size == 0:
+        return None
+
+    return ts[t_indices]
+
+
 def align_time_series(a: TimeSeries | None, b: TimeSeries | None
                       ) -> tuple[TimeSeries | None, TimeSeries | None]:
     """Given two time series, find their overlapping parts (i.e. data on

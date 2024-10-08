@@ -18,10 +18,10 @@
 Install the dependent packages using `virtualenv` or `conda`.
 - NumPy
 - SciPy
-- PyTorch
+- PyTorch 2.1
 - torchdiffeq
 - torchode
-- PySINDy
+- PySINDy 1.7
 - h5py
 - Matplotlib
 - seaborn

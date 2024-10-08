@@ -13,7 +13,6 @@ from torchdiffeq import odeint_adjoint as tdf_odeint
 import torchode
 import pysindy as ps
 from pysindy.feature_library.base import BaseFeatureLibrary
-from pysindy.feature_library import CustomLibrary
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import tqdm
@@ -50,7 +49,7 @@ class BaseTimeSeriesLearner(metaclass=ABCMeta):
             **kwargs: additional keyword arguments that a subclass may use.
         """
         self._train_data = train_data
-        self._num_vars = train_data[0].x.shape[1]
+        self._num_vars = train_data[0].num_vars
         self._output_dir = output_dir
         self._output_prefix = output_prefix
         self._is_trained = False
@@ -1306,7 +1305,7 @@ class OdeSystemLearner(BaseTimeSeriesLearner):
         elif isinstance(basis_funcs, BaseFeatureLibrary):
             basis_lib = basis_funcs
         else:  # basis_funcs is a list of basis functions
-            basis_lib = CustomLibrary(basis_funcs, basis_exprs)
+            basis_lib = ps.CustomLibrary(basis_funcs, basis_exprs)
         self._model = ps.SINDy(optimizer=optimizer, feature_library=basis_lib)
 
         # transform training data

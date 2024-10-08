@@ -6,11 +6,11 @@ from argparse import ArgumentParser
 import numpy as np
 from numpy.random import default_rng
 import pandas as pd
-from pysindy import STLSQ, PolynomialLibrary
+from pysindy import STLSQ, PolynomialLibrary, WeakPDELibrary
 import h5py
 import matplotlib
 
-from time_series_data import load_dataset_from_h5
+from time_series_data import get_time_series_segment, load_dataset_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner
 from dynamical_model_learning import OdeSystemLearner
 from model_helpers import get_model_module, get_data_path, \
@@ -207,9 +207,69 @@ def get_full_learning_config(model_name, search_config):
             }
 
 
+def convert_to_weak_library(search_config, t_train):
+    for basis_type in search_config['basis_funcs']:
+        basis_funcs = search_config['basis_funcs'][basis_type]
+        basis_exprs = search_config['basis_exprs'][basis_type]
+
+        # convert polynomial library to a list of functions
+        if isinstance(basis_funcs, PolynomialLibrary):
+            num_vars = search_config['train_samples'][0].num_vars
+            basis_funcs, basis_exprs = create_polynomial_basis(
+                num_vars, basis_funcs.degree, basis_funcs.include_bias)
+
+        # create a Weak SINDy library
+        search_config['basis_funcs'][basis_type] = WeakPDELibrary(
+            library_functions=basis_funcs, function_names=basis_exprs,
+            spatiotemporal_grid=t_train, K=t_train.size)
+        search_config['basis_exprs'][basis_type] = basis_exprs
+
+
+def create_polynomial_basis(num_vars, degree, include_bias):
+    basis_funcs = []
+    basis_exprs = []
+
+    if include_bias:
+        basis_funcs.append(lambda x: 1.0)
+        basis_exprs.append(lambda x: '1')
+
+    if degree >= 1:
+        basis_funcs.append(lambda x: x)
+        basis_exprs.append(lambda x: f'{x}')
+
+    if degree >= 2:
+        basis_funcs.append(lambda x: x ** 2)
+        basis_exprs.append(lambda x: f'{x}^2')
+
+        if num_vars >= 2:
+            basis_funcs.append(lambda x, y: x * y)
+            basis_exprs.append(lambda x, y: f'{x} {y}')
+
+    if degree >= 3:
+        basis_funcs.append(lambda x: x ** 3)
+        basis_exprs.append(lambda x: f'{x}^3')
+
+        if num_vars >= 2:
+            basis_funcs.append(lambda x, y: x * x * y)
+            basis_exprs.append(lambda x, y: f'{x}^2 {y}')
+
+            basis_funcs.append(lambda x, y: x * y * y)
+            basis_exprs.append(lambda x, y: f'{x} {y}^2')
+
+        if num_vars >= 3:
+            basis_funcs.append(lambda x, y, z: x * y * z)
+            basis_exprs.append(lambda x, y, z: f'{x} {y} {z}')
+
+    return basis_funcs, basis_exprs
+
+
 def recover_from_data(args, search_config, verbose) -> bool:
     print('Setting up SINDy learning directly from data...', flush=True)
+
+    sindy_train_samples = search_config['train_samples']
     get_full_learning_config(args.model, search_config)
+    if search_config['use_weak_sindy']:
+        convert_to_weak_library(search_config, sindy_train_samples[0].t)
 
     def recovered_dynamics(t, x, model):
         return model.predict(x[np.newaxis, :])[0]
@@ -240,8 +300,8 @@ def recover_from_data(args, search_config, verbose) -> bool:
     print('SINDy model selection setup finished', flush=True)
     print_hrule()
 
-    search_basis(search_config, search_config['train_samples'],
-                 {'t_step': t_step}, verbose=verbose)
+    search_basis(search_config, sindy_train_samples, {'t_step': t_step},
+                 verbose=verbose)
 
     return True
 
@@ -291,15 +351,12 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
     output_prefix += f'_batch_size_{batch_size:02d}'
     model_module = get_model_module(args.model)
     if args.ude_rhs == 'nn':
-        get_full_learning_config(args.model, search_config)
         neural_dynamics = model_module.get_neural_dynamics(
             num_hidden_neurons=num_hidden_neurons, activation=activation)
 
         def recovered_dynamics(t, x, model):
             return model.predict(x[np.newaxis, :])[0]
     else:  # args.ude_rhs == 'hybrid'
-        get_latent_learning_config(args.model, search_config)
-
         match args.model:
             case 'lotka_volterra':
                 growth_rates = np.array([params_true[0], -params_true[3]])
@@ -344,9 +401,10 @@ def recover_from_ude(args, search_config, params_true, verbose) -> bool:
     print('UDE model loaded', flush=True)
 
     # set up for SINDy model selection
+    sindy_type = 'weak-sindy' if search_config['use_weak_sindy'] else 'sindy'
     output_dir = get_model_selection_dir(
         args.model, noise_type, noise_level, seed, data_source, 'ude',
-        'sindy', ude_rhs=args.ude_rhs, nn_config=nn_config)
+        sindy_type, ude_rhs=args.ude_rhs, nn_config=nn_config)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     search_config['output_dir'] = output_dir
@@ -406,17 +464,24 @@ def search_time_steps(search_config, ude_train_samples, verbose=False):
             ts.dx = dx_pred
 
             # cut off some initial and final time points
-            t_sindy_indices = np.where(
-                (ts.t >= sindy_t_span[0]) & (ts.t <= sindy_t_span[1]))[0]
-            if t_sindy_indices.size == 0:
+            ts = get_time_series_segment(ts, sindy_t_span[0], sindy_t_span[1])
+            if ts is None:
                 raise ValueError('No data for SINDy training on the given '
                                  'time span')
-            ts = ts[t_sindy_indices]
 
             sindy_train_samples.append(ts)
 
         print('SINDy training samples generated from neural dynamics')
         print_hrule()
+
+        # set up basis functions
+        if search_config['ude_rhs'] == 'hybrid':
+            get_latent_learning_config(search_config['model'], search_config)
+        else:  # search_config['ude_rhs'] == 'nn'
+            get_full_learning_config(search_config['model'], search_config)
+
+        if search_config['use_weak_sindy']:
+            convert_to_weak_library(search_config, sindy_train_samples[0].t)
 
         search_basis(search_config, sindy_train_samples, {'t_step': t_step},
                      verbose=verbose)
@@ -510,15 +575,20 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
     # run SINDy with given settings
     eq_learner = OdeSystemLearner(sindy_train_samples, output_dir,
                                   output_prefix)
-    valid_kwargs = {
-        'eval_func': recovered_dynamics,
-        'integrator_kwargs': {
-            'args': ('model', ),
-            'method': 'LSODA',
-            'events': stop_events,
-            'min_step': 1e-8,
-        },
-    }
+
+    if search_config['use_weak_sindy']:
+        valid_kwargs = None
+    else:
+        valid_kwargs = {
+            'eval_func': recovered_dynamics,
+            'integrator_kwargs': {
+                'args': ('model', ),
+                'method': 'LSODA',
+                'events': stop_events,
+                'min_step': 1e-8,
+            },
+        }
+
     eq_learner.train(optimizer_type=sindy_optimizers[optimizer_name],
                      threshold=search_config['opt_threshold'],
                      learn_dx=search_config['learn_dx'],
@@ -531,13 +601,23 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
 
     # gather results
     model_info['optimizer_args'] = str(optimizer_args)[1:-1]
-    model_info['mse'] = eq_learner.valid_metrics['mse']
-    model_info['aicc'] = eq_learner.valid_metrics['aicc']
-    for i in range(eq_learner.num_vars):
-        model_info[f'indiv_mse[{i}]'] = \
-            eq_learner.valid_metrics['indiv_mse'][i]
-        model_info[f'indiv_aicc[{i}]'] = \
-            eq_learner.valid_metrics['indiv_aicc'][i]
+    if search_config['use_weak_sindy']:
+        model_info['mse'] = np.nan
+        model_info['aicc'] = np.nan
+
+        for i in range(eq_learner.num_vars):
+            model_info[f'indiv_mse[{i}]'] = np.nan
+            model_info[f'indiv_aicc[{i}]'] = np.nan
+    else:
+        model_info['mse'] = eq_learner.valid_metrics['mse']
+        model_info['aicc'] = eq_learner.valid_metrics['aicc']
+
+        for i in range(eq_learner.num_vars):
+            model_info[f'indiv_mse[{i}]'] = \
+                eq_learner.valid_metrics['indiv_mse'][i]
+            model_info[f'indiv_aicc[{i}]'] = \
+                eq_learner.valid_metrics['indiv_aicc'][i]
+
     model_info['recovered_eqs'] = '\n'.join(
         [f'(x{j})\' = {eq}' for j, eq in enumerate(
             eq_learner.model.equations())])
@@ -545,30 +625,34 @@ def get_sindy_model(search_config, sindy_train_samples, model_info,
     print('Saved metrics of the learned SINDy model', flush=True)
 
     # evaluate model on test sample
-    eval_integrator_kwargs = {'args': (eq_learner.model, ),
-                              'method': 'LSODA',
-                              'events': stop_events,
-                              'min_step': 1e-8}
-    if search_config['model'] == 'emt':
-        # evaluate EMT model on denser time points
-        test_samples = [ts[1:] for ts in test_samples]
-        t_test = test_samples[0].t
-        # use time points that are powers of 2 to avoid numerical issues
-        t_eval = np.arange(t_test[0], t_test[-1] + 1e-8, 2 ** -4)
-        x0_eval = [ts.x[0, :] for ts in test_samples]
-        eq_learner.eval(t_eval=t_eval, x0_eval=x0_eval, ref_data=test_samples,
-                        eval_func=recovered_dynamics,
-                        integrator_kwargs=eval_integrator_kwargs,
-                        verbose=verbose)
-        eq_learner.plot_pred_data(ref_data=test_samples,
-                                  output_suffix='pred_data_long')
-    else:
-        eq_learner.eval(eval_data=test_samples, eval_func=recovered_dynamics,
-                        integrator_kwargs=eval_integrator_kwargs,
-                        verbose=verbose)
-        eq_learner.plot_pred_data(output_suffix='pred_data_long')
-    print('Saved plots of dynamics predicted by the learned SINDy model',
-          flush=True)
+    if not search_config['use_weak_sindy']:
+        eval_integrator_kwargs = {'args': (eq_learner.model, ),
+                                  'method': 'LSODA',
+                                  'events': stop_events,
+                                  'min_step': 1e-8}
+        if search_config['model'] == 'emt':
+            # evaluate EMT model on denser time points
+            test_samples = [ts[1:] for ts in test_samples]
+            t_test = test_samples[0].t
+            # use time points that are powers of 2 to avoid numerical issues
+            t_eval = np.arange(t_test[0], t_test[-1] + 1e-8, 2 ** -4)
+            x0_eval = [ts.x[0, :] for ts in test_samples]
+            eq_learner.eval(t_eval=t_eval, x0_eval=x0_eval,
+                            ref_data=test_samples,
+                            eval_func=recovered_dynamics,
+                            integrator_kwargs=eval_integrator_kwargs,
+                            verbose=verbose)
+            eq_learner.plot_pred_data(ref_data=test_samples,
+                                      output_suffix='pred_data_long')
+        else:
+            eq_learner.eval(eval_data=test_samples,
+                            eval_func=recovered_dynamics,
+                            integrator_kwargs=eval_integrator_kwargs,
+                            verbose=verbose)
+            eq_learner.plot_pred_data(output_suffix='pred_data_long')
+
+        print('Saved plots of dynamics predicted by the learned SINDy model',
+              flush=True)
 
     print_hrule()
 
@@ -610,6 +694,8 @@ def get_args():
     arg_parser.add_argument('--sindy_t_span', nargs=2, type=float,
                             default=[-np.inf, np.inf], metavar=('T0', 'T_END'),
                             help='Time span of SINDy training data')
+    arg_parser.add_argument('--use_weak_sindy', action='store_true',
+                            help='Use weak form of SINDy for training')
     arg_parser.add_argument('--matplotlib_backend', type=str, default='Agg',
                             help='Matplotlib backend to use')
     arg_parser.add_argument('--verbose', action='store_true',
@@ -688,6 +774,11 @@ def main():
     search_config['sindy_t_span'] = tuple(sindy_t_span)
     t_span_str = ', '.join(str(t) for t in search_config['sindy_t_span'])
     print(f'Time span for SINDy training: ({t_span_str})', flush=True)
+    search_config['use_weak_sindy'] = args.use_weak_sindy
+    if search_config['use_weak_sindy']:
+        print('Weak SINDy enabled; recovered model will be evaluated',
+              flush=True)
+        valid_samples = None
     search_config['train_samples'] = train_samples
     search_config['valid_samples'] = valid_samples
     search_config['test_samples'] = test_samples
@@ -705,7 +796,7 @@ def main():
         event.terminal = True
 
     # initialize table for model metrics
-    num_variables = train_samples[0].x.shape[1]
+    num_variables = train_samples[0].num_vars
     model_metric_columns = ['t_step', 'basis', 'basis_normalized', 'optimizer',
                             'optimizer_args', 'mse']
     model_metric_columns.extend(

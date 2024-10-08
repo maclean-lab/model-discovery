@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import seaborn as sns
 
-from time_series_data import load_dataset_from_h5
+from time_series_data import TimeSeries, load_dataset_from_h5
 from dynamical_model_learning import NeuralDynamicsLearner, OdeSystemLearner
 from model_helpers import get_model_module, get_model_class, \
     get_model_prefix, get_project_root, get_data_path, get_model_selection_dir
@@ -140,6 +140,8 @@ def get_args():
         arg_parser.add_argument('--plot_interactions', action='store_true',
                                 help='Whether to plot interactions betwwen '
                                 'variables in SINDy model')
+        arg_parser.add_argument('--emt_sample', type=str, default='none',
+                                help='Alternative EMT sample to testing SINDy')
 
     return arg_parser.parse_args()
 
@@ -376,6 +378,7 @@ def plot_sindy_data(args):
     optimizer_name = args.sindy_optimizer
     threshold = args.sindy_opt_threshold
     plot_interactions = args.plot_interactions
+    emt_sample = args.emt_sample
     verbose = True
 
     # load data
@@ -393,7 +396,14 @@ def plot_sindy_data(args):
     sindy_t_span[0] = max(sindy_t_span[0], t_train_span[0])
     sindy_t_span[1] = min(sindy_t_span[1], t_train_span[1])
     train_samples = load_dataset_from_h5(data_fd, 'train')
-    test_samples = load_dataset_from_h5(data_fd, 'test')
+    if args.model == 'emt' and emt_sample != 'none':
+        emt_data_path = os.path.join(
+            get_project_root(), 'data', f'emt_{emt_sample}_mean.csv')
+        emt_mean = pd.read_csv(emt_data_path, index_col=0)
+        test_samples = [
+            TimeSeries(emt_mean.index.to_numpy(), emt_mean.to_numpy())]
+    else:
+        test_samples = load_dataset_from_h5(data_fd, 'test')
     data_fd.close()
 
     # preprocess SINDy training data by UDE model
@@ -493,6 +503,8 @@ def plot_sindy_data(args):
             sindy_model_alias += f'_{arg_name}_{arg_val}'
     figure_path = f'{noise_type}_noise_{noise_level:.03f}_seed_{seed:04d}' \
         f'_{data_source}_{prior_step_alias}_{sindy_model_alias}'
+    if args.model == 'emt' and emt_sample != 'none':
+        figure_path += f'_{emt_sample}'
     if plot_interactions:
         figure_path += '_interactions.pdf'
     else:
