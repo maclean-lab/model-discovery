@@ -479,7 +479,8 @@ def plot_sindy_data(args):
                          'min_step': 1e-8}
     if args.model == 'emt':
         # evaluate EMT model on denser time points
-        test_samples = [ts[1:] for ts in test_samples]
+        if emt_sample == 'none':
+            test_samples = [ts[1:] for ts in test_samples]
         t_test = test_samples[0].t
         # use time points that are powers of 2 to avoid numerical issues
         t_eval = np.arange(t_test[0], t_test[-1] + 1e-8, 2 ** -3)
@@ -578,7 +579,8 @@ def plot_sindy_data(args):
                     plt.plot(ts_pred.t, ts_pred.x[:, i], color=data_colors[i],
                              label=data_labels[i])
                 # add a vertical line to indicate the end of training data
-                plt.axvline(t_train_span[1], color='k', linestyle='--')
+                if args.model != 'emt' or emt_sample != 'none':
+                    plt.axvline(t_train_span[1], color='k', linestyle='--')
                 plt.xlabel(args.x_label)
                 plt.xlabel(args.y_label)
                 if args.legend:
