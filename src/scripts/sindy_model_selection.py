@@ -312,7 +312,7 @@ def recover_from_data(args, search_config, params_true, verbose) -> bool:
 
         if search_config['use_weak_sindy']:
             def recovered_dynamics(t, x, model, basis_lib):
-                theta_x = basis_lib.transform([x]).squeeze()
+                theta_x = basis_lib.transform(x.reshape(1, -1)).squeeze()
                 coeffs = model.coefficients().T
 
                 return np.dot(theta_x, coeffs)
